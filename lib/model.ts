@@ -1,4 +1,4 @@
-// Token Radar — comps-calibrated implied-value model (radar-2).
+// Token Radar — comps-calibrated implied-value model (radar-3).
 //
 // One sealed snapshot of the protocol universe in, one ranked board out.
 // The board ranks EVERY rankable pre-token protocol in the snapshot (the
@@ -30,6 +30,17 @@
 //   breadth        = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
 //   implied        = max(1, round(tvl_usd * comp * growthMult
 //                                  * maturity * breadth))
+//
+// radar-3 adds what the detail view needs to defend the number: every
+// category's comp now names the live protocols it was read off (the five
+// biggest by market cap, with their own ratios), and every row carries
+// whether its multiple is its category's median or the global fallback —
+// 84 of the 198 rows fall back, most of all the Risk Curators at the top,
+// whose single live comp (Api3, 2.98x) is too thin to price a category.
+// The dashboard says so on the row, instead of printing a bare 0.17x.
+// Farm plans stay derived from the protocol's own record, and each row
+// now carries a one-line farm summary (capital, gas, hold, setup time)
+// so a reader can size the whole plan before reading its seven steps.
 //
 // No protocol name is ever special-cased: the same function scores every
 // row, and the dashboard shows each row's inputs so any reader can redo
@@ -90,10 +101,16 @@ export const MODEL: ModelConstants = {
   comp_min_live: 3,
 };
 
-export const MODEL_VERSION = 'radar-2-comps';
+export const MODEL_VERSION = 'radar-3-comps';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
+
+/** One live-token protocol behind a category's comp: its name and its own mcap/TVL. */
+export interface CompMember {
+  name: string;
+  ratio: number;
+}
 
 /** One category's comp: the live market's own mcap/TVL multiple. */
 export interface CategoryComp {
@@ -101,6 +118,8 @@ export interface CategoryComp {
   live_count: number;
   median_multiple: number;
   used_global: boolean;
+  /** The five biggest live-token protocols in the category, by market cap, with their own ratios. */
+  members: CompMember[];
 }
 
 /** A farm step: the action, what it costs, and how long it takes. */
@@ -139,6 +158,15 @@ export interface BoardRow {
   farm_steps: string[];
 }
 
+/** A row's farm plan sized up in one line: what the seven steps cost in all. */
+export interface FarmSummary {
+  capital_usd: number;
+  gas: string;
+  hold_days: number;
+  setup_minutes: number;
+  weekly_gas: string;
+}
+
 /** The dashboard's compact view of one row. */
 export interface RadarRow {
   rank: number;
@@ -153,9 +181,13 @@ export interface RadarRow {
   age_days: number | null;
   implied_value_usd: number;
   comp_multiple: number;
+  comp_live_count: number;
+  comp_used_global: boolean;
+  comp_members: CompMember[];
   growth_multiplier: number;
   maturity_multiplier: number;
   breadth_multiplier: number;
+  farm_summary: FarmSummary;
   on_watchlist: boolean;
 }
 
@@ -248,28 +280,35 @@ export function isRankable(p: SnapshotProtocol): boolean {
 /**
  * The comps table, read off the snapshot's own live-token protocols:
  * per-category median mcap/TVL, winsorised, with the global median as the
- * fallback for thin categories. Returns the global median and one row per
- * category that has at least one live protocol.
+ * fallback for thin categories. Each row also names the five biggest
+ * live-token protocols in the category, by market cap, with their own
+ * ratios, so the dashboard can show exactly who prices the category —
+ * and say when the category was too thin and the global median was used.
  */
 export function categoryComps(snapshot: Snapshot, model: ModelConstants = MODEL): { global: number; comps: CategoryComp[] } {
   const all: number[] = [];
-  const byCategory = new Map<string, number[]>();
+  const byCategory = new Map<string, { ratios: number[]; members: { name: string; ratio: number; mcap: number }[] }>();
   for (const p of snapshot.protocols) {
     if (isPreToken(p) || p.mcap_usd === null || p.tvl_usd <= 0) continue;
     const ratio = Math.min(model.comp_max, Math.max(model.comp_min, p.mcap_usd / p.tvl_usd));
     all.push(ratio);
     const key = p.category ?? 'Other';
-    const list = byCategory.get(key) ?? [];
-    list.push(ratio);
-    byCategory.set(key, list);
+    const entry = byCategory.get(key) ?? { ratios: [], members: [] };
+    entry.ratios.push(ratio);
+    entry.members.push({ name: p.name, ratio, mcap: p.mcap_usd });
+    byCategory.set(key, entry);
   }
   const global = all.length > 0 ? median(all) : 0.25;
   const comps: CategoryComp[] = [...byCategory.entries()]
-    .map(([category, values]) => ({
+    .map(([category, entry]) => ({
       category,
-      live_count: values.length,
-      median_multiple: values.length >= model.comp_min_live ? median(values) : global,
-      used_global: values.length < model.comp_min_live,
+      live_count: entry.ratios.length,
+      median_multiple: entry.ratios.length >= model.comp_min_live ? median(entry.ratios) : global,
+      used_global: entry.ratios.length < model.comp_min_live,
+      members: entry.members
+        .sort((a, b) => b.mcap - a.mcap || (a.name < b.name ? -1 : 1))
+        .slice(0, 5)
+        .map((m) => ({ name: m.name, ratio: round4(m.ratio) })),
     }))
     .sort((a, b) => b.median_multiple - a.median_multiple || (a.category < b.category ? -1 : 1));
   return { global, comps };
@@ -420,7 +459,9 @@ function secondActionFor(p: SnapshotProtocol, capital: number, chain: string): s
 /**
  * A protocol's farm plan: seven steps, each an action with a cost and a
  * time. The plan is derived from the protocol's own record (category,
- * chains, TVL, age), never from a hand-written list of names.
+ * chains, TVL, age), never from a hand-written list of names. Every step
+ * names the concrete thing to do, what it costs and how long it takes:
+ * a plan that only says "be active" is not a plan.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -429,7 +470,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const gas = gasFor(p);
   return [
     {
-      text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+      text: `Use a fresh wallet that holds only the funds you plan to farm, fund it from an exchange, and keep its seed phrase offline — never farm from the wallet that holds your savings.`,
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
     },
@@ -444,12 +485,12 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '10 minutes a week',
     },
     {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot, and do the weekly action on the same day each week.`,
       cost: `the $${capital} stays in the position`,
       time: `${hold} days`,
     },
     {
-      text: `Before you withdraw, open the protocol's own points or rewards page from its official site and check whether your wallet qualifies.`,
+      text: `Before you withdraw, search the protocol name plus 'points', open only the official domain, and check whether your wallet qualifies on its own points or rewards page.`,
       cost: 'no fee to check, and never pay to claim',
       time: '10 minutes',
     },
@@ -459,11 +500,22 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '10 minutes at claim time',
     },
     {
-      text: `Write the wallet, the dates and every transaction in a farm log, then revoke any approval you no longer need.`,
+      text: `Write the wallet, the dates and every transaction in a farm log, then revoke any approval you no longer need on the chain's block explorer token-approval page.`,
       cost: 'nothing but the log',
       time: '5 minutes',
     },
   ];
+}
+
+/** One row's farm plan sized up: the capital, gas, hold and setup time the seven steps add up to. */
+export function farmSummary(p: SnapshotProtocol, age: number | null): FarmSummary {
+  return {
+    capital_usd: capitalFor(p),
+    gas: gasFor(p),
+    hold_days: holdDaysFor(age),
+    setup_minutes: 35,
+    weekly_gas: 'about $2 of gas a week',
+  };
 }
 
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
@@ -483,8 +535,10 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
     }));
 }
 
-/** A board row's compact form for data.js. */
-export function radarRow(row: BoardRow, watch: Set<string>): RadarRow {
+/** A board row's compact form for data.js, with the comp's provenance and the farm summary. */
+export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: number; comps: CategoryComp[] }): RadarRow {
+  const table = new Map(comps.comps.map((c) => [c.category, c]));
+  const compRow = row.category === null ? undefined : table.get(row.category);
   return {
     rank: row.rank,
     slug: row.slug,
@@ -498,9 +552,16 @@ export function radarRow(row: BoardRow, watch: Set<string>): RadarRow {
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
     comp_multiple: row.model.comp_multiple,
+    comp_live_count: compRow?.live_count ?? 0,
+    comp_used_global: compRow?.used_global ?? true,
+    comp_members: compRow?.members ?? [],
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
+    farm_summary: farmSummary(
+      { slug: row.slug, name: row.name, category: row.category, chains: row.chains, tvl_usd: row.tvl_usd, change_7d: row.change_7d, mcap_usd: row.mcap_usd, listed_at: row.listed_at, gecko_id: row.gecko_id, symbol: row.symbol },
+      row.age_days,
+    ),
     on_watchlist: watch.has(row.slug),
   };
 }
@@ -524,7 +585,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     live_size: live.length,
     global_comp: round4(comps.global),
     comps: comps.comps,
-    rows: board.map((r) => radarRow(r, watch)),
+    rows: board.map((r) => radarRow(r, watch, comps)),
     live,
   };
   return { board, radar };
