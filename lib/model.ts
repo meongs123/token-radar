@@ -1,74 +1,9 @@
 // Token Radar — comps-calibrated implied-value model (radar-3).
 //
-// One sealed snapshot of the protocol universe in, one ranked board out.
-// The board ranks EVERY rankable pre-token protocol in the snapshot (the
-// 40-protocol watchlist is the floor, never the ceiling): a protocol is
-// rankable when DefiLlama records no token for it (no market cap, no
-// CoinGecko id, no symbol), and it is not a wrapped, staked or bridged
-// product of a protocol whose token already trades — the house's own
-// watchlist rule, applied to every row, not just the watchlist: no
-// Bridge / Canonical Bridge / Liquid Staking / Liquid Restaking /
-// Restaked BTC / CEX category, no whole word wrapped, staked or staking
-// in the name, no exchange name at the start of the name, and no version
-// marker at the end. WBTC is Bitcoin on Ethereum, not a protocol still
-// waiting on a launch of its own. Live-token protocols are kept apart
-// and shown with the market's own value, never mixed into the ranking.
-//
-// Implied value is calibrated on the snapshot itself, not on a flat guess:
-// the market's own mcap/TVL multiple for each category is read off the
-// live-token protocols in the same snapshot, so a lending protocol is
-// priced like lending protocols that already trade, and a DEX like DEXs.
-//
-//   comp(category) = median(mcap_usd / tvl_usd) over live-token protocols
-//                    in that category (winsorised to [0.01, 5]); categories
-//                    with fewer than 3 live comps use the global median.
-//   growth         = clamp(change_7d, -60, 120) per cent
-//   growthMult     = 1 + (growth / 100) * 0.5
-//   maturity       = 0.6 + min(age_days, 1095) / 1095 * 0.4
-//                    (age = days since first listed with no token;
-//                     unknown age counts as 365 days)
-//   breadth        = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
-//   implied        = max(1, round(tvl_usd * comp * growthMult
-//                                  * maturity * breadth))
-//
-// radar-3 adds what the detail view needs to defend the number: every
-// category's comp now names the live protocols it was read off (the five
-// biggest by market cap, with their own ratios), and every row carries
-// whether its multiple is its category's median or the global fallback —
-// 84 of the 198 rows fall back, most of all the Risk Curators at the top,
-// whose single live comp (Api3, 2.98x) is too thin to price a category.
-// The dashboard says so on the row, instead of printing a bare 0.17x.
-// Farm plans stay derived from the protocol's own record, and each row
-// now carries a one-line farm summary (capital, gas, hold, setup time)
-// so a reader can size the whole plan before reading its seven steps.
-//
-// No protocol name is ever special-cased: the same function scores every
-// row, and the dashboard shows each row's inputs so any reader can redo
-// the arithmetic. Implied value is a model claim, never a price and never
-// a prediction that a token will launch, or when.
-
-/** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
-export interface SnapshotProtocol {
-  slug: string;
-  name: string;
-  category: string | null;
-  chains: string[];
-  tvl_usd: number;
-  change_7d: number | null;
-  mcap_usd: number | null;
-  listed_at: string | null;
-  gecko_id: string | null;
-  symbol: string | null;
-}
-
-/** The whole snapshot document. */
-export interface Snapshot {
-  as_of: string;
-  source: string;
-  floor_usd: number;
-  protocols: SnapshotProtocol[];
-  watchlist: string[];
-}
+// The pricing function is first in this file: impliedValue scores every
+// row from the snapshot's own figures, and ticketEconomics prices a
+// $1,000 farm ticket from the plan's own stated costs. The types, the
+// board builder, the farm plans and the snapshot parser follow.
 
 /** The model's constants, as the dashboard states them. */
 export interface ModelConstants {
@@ -105,127 +40,6 @@ export const MODEL_VERSION = 'radar-3-comps';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
-
-/** One live-token protocol behind a category's comp: its name and its own mcap/TVL. */
-export interface CompMember {
-  name: string;
-  ratio: number;
-}
-
-/** One category's comp: the live market's own mcap/TVL multiple. */
-export interface CategoryComp {
-  category: string;
-  live_count: number;
-  median_multiple: number;
-  used_global: boolean;
-  /** The five biggest live-token protocols in the category, by market cap, with their own ratios. */
-  members: CompMember[];
-}
-
-/** A farm step: the action, what it costs, and how long it takes. */
-export interface FarmStep {
-  text: string;
-  cost: string;
-  time: string;
-}
-
-/** One row of board.json: the ranked board's row. */
-export interface BoardRow {
-  rank: number;
-  slug: string;
-  name: string;
-  category: string | null;
-  chains: string[];
-  tvl_usd: number;
-  change_7d: number | null;
-  mcap_usd: number | null;
-  listed_at: string | null;
-  gecko_id: string | null;
-  symbol: string | null;
-  token_status: 'pre-token';
-  age_days: number | null;
-  implied_value_usd: number;
-  model: {
-    comp_category: string;
-    comp_multiple: number;
-    comp_live_count: number;
-    growth_pct: number;
-    growth_multiplier: number;
-    maturity_multiplier: number;
-    breadth_multiplier: number;
-    age_days: number | null;
-  };
-  farm_steps: string[];
-}
-
-/** A row's farm plan sized up in one line: what the seven steps cost in all. */
-export interface FarmSummary {
-  capital_usd: number;
-  gas: string;
-  hold_days: number;
-  setup_minutes: number;
-  weekly_gas: string;
-}
-
-/** The dashboard's compact view of one row. */
-export interface RadarRow {
-  rank: number;
-  slug: string;
-  name: string;
-  category: string | null;
-  chains: string[];
-  tvl_usd: number;
-  change_7d: number | null;
-  mcap_usd: number | null;
-  listed_at: string | null;
-  age_days: number | null;
-  implied_value_usd: number;
-  comp_multiple: number;
-  comp_live_count: number;
-  comp_used_global: boolean;
-  comp_members: CompMember[];
-  growth_multiplier: number;
-  maturity_multiplier: number;
-  breadth_multiplier: number;
-  farm_summary: FarmSummary;
-  on_watchlist: boolean;
-}
-
-/** A live-token protocol: it already trades, so the board shows the market's own value. */
-export interface LiveRow {
-  slug: string;
-  name: string;
-  category: string | null;
-  chains: string[];
-  tvl_usd: number;
-  mcap_usd: number | null;
-  change_7d: number | null;
-}
-
-/** Everything the dashboard needs: the board, the live set, the comps and the model. */
-export interface RadarData {
-  as_of: string;
-  source: string;
-  floor_usd: number;
-  model: ModelConstants;
-  model_version: string;
-  watchlist_size: number;
-  board_size: number;
-  early_size: number;
-  live_size: number;
-  global_comp: number;
-  comps: CategoryComp[];
-  rows: RadarRow[];
-  live: LiveRow[];
-}
-
-/** Why the snapshot is not one this model can score. */
-export class SnapshotError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SnapshotError';
-  }
-}
 
 const DAY_MS = 86_400_000;
 
@@ -276,6 +90,53 @@ export function isRankable(p: SnapshotProtocol): boolean {
     !EXCHANGE_PREFIX.test(p.name)
   );
 }
+
+// One sealed snapshot of the protocol universe in, one ranked board out.
+// The board ranks EVERY rankable pre-token protocol in the snapshot (the
+// 40-protocol watchlist is the floor, never the ceiling): a protocol is
+// rankable when DefiLlama records no token for it (no market cap, no
+// CoinGecko id, no symbol), and it is not a wrapped, staked or bridged
+// product of a protocol whose token already trades — the house's own
+// watchlist rule, applied to every row, not just the watchlist: no
+// Bridge / Canonical Bridge / Liquid Staking / Liquid Restaking /
+// Restaked BTC / CEX category, no whole word wrapped, staked or staking
+// in the name, no exchange name at the start of the name, and no version
+// marker at the end. WBTC is Bitcoin on Ethereum, not a protocol still
+// waiting on a launch of its own. Live-token protocols are kept apart
+// and shown with the market's own value, never mixed into the ranking.
+//
+// Implied value is calibrated on the snapshot itself, not on a flat guess:
+// the market's own mcap/TVL multiple for each category is read off the
+// live-token protocols in the same snapshot, so a lending protocol is
+// priced like lending protocols that already trade, and a DEX like DEXs.
+//
+//   comp(category) = median(mcap_usd / tvl_usd) over live-token protocols
+//                    in that category (winsorised to [0.01, 5]); categories
+//                    with fewer than 3 live comps use the global median.
+//   growth         = clamp(change_7d, -60, 120) per cent
+//   growthMult     = 1 + (growth / 100) * 0.5
+//   maturity       = 0.6 + min(age_days, 1095) / 1095 * 0.4
+//                    (age = days since first listed with no token;
+//                     unknown age counts as 365 days)
+//   breadth        = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
+//   implied        = max(1, round(tvl_usd * comp * growthMult
+//                                  * maturity * breadth))
+//
+// radar-3 adds what the detail view needs to defend the number: every
+// category's comp now names the live protocols it was read off (the five
+// biggest by market cap, with their own ratios), and every row carries
+// whether its multiple is its category's median or the global fallback —
+// 84 of the 198 rows fall back, most of all the Risk Curators at the top,
+// whose single live comp (Api3, 2.98x) is too thin to price a category.
+// The dashboard says so on the row, instead of printing a bare 0.17x.
+// Farm plans stay derived from the protocol's own record, and each row
+// now carries a one-line farm summary (capital, gas, hold, setup time)
+// so a reader can size the whole plan before reading its seven steps.
+//
+// No protocol name is ever special-cased: the same function scores every
+// row, and the dashboard shows each row's inputs so any reader can redo
+// the arithmetic. Implied value is a model claim, never a price and never
+// a prediction that a token will launch, or when.
 
 /**
  * The comps table, read off the snapshot's own live-token protocols:
@@ -341,6 +202,78 @@ export function impliedValue(
   return { implied, comp, compLive, growthPct, growthMult, maturityMult, breadthMult, age };
 }
 
+/** The standard farm ticket the board prices every row at, in dollars. */
+export const TICKET_USD = 1000;
+/** The share of a launch that goes to depositors, pro rata, in the slice. */
+export const TICKET_SHARE = 0.1;
+/** The T-bill yield a ticket gives up while it sits in the position. */
+export const TBILL_RATE = 0.04;
+
+/** What a $1,000 farm ticket in one protocol is worth, in dollars. */
+export interface TicketEconomics {
+  ticket_usd: number;
+  /** The ticket's pro-rata share of the implied value, if 10% of the launch goes to depositors. */
+  slice_usd: number;
+  /** The plan's own stated gas: $3 to fund the wallet, one transaction's gas to deposit and one to claim, $2 a week over the hold. */
+  gas_usd: number;
+  /** The 4% T-bill yield the ticket gives up over the hold. */
+  forgone_usd: number;
+  /** Slice minus gas minus forgone yield. */
+  net_usd: number;
+  /** Net per hour of the plan's time: 35 minutes to set up, 10 a week, 10 to check, 10 to claim. */
+  net_per_hour_usd: number;
+  /** FARM pays after fees and the T-bill; THIN beats its fees but not the T-bill; SKIP does not cover its fees. */
+  verdict: 'FARM' | 'THIN' | 'SKIP';
+  /** The ticket at which the plan breaks even, or null when the T-bill beats it at any size. */
+  pays_from_usd: number | null;
+  hold_days: number;
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Gas for one transaction on a chain, in dollars: the midpoints of the ranges gasFor states in words. */
+function gasTxUsd(chain: string): number {
+  const c = chain.toLowerCase();
+  if (c.includes('ethereum')) return 9;
+  if (c.includes('solana')) return 0.05;
+  if (c.includes('bitcoin')) return 3.5;
+  return 2;
+}
+
+/**
+ * A $1,000 farm ticket, priced from the farm plan's own stated costs and
+ * the row's own implied value — no new pricing inputs, only two stated
+ * assumptions the board prints next to the numbers: 10% of the launch
+ * goes to depositors pro rata, and the ticket gives up a 4% T-bill yield
+ * while it sits in the position. The verdict is the ticket's own
+ * arithmetic: FARM when the slice clears gas and the T-bill, THIN when
+ * it clears gas alone, SKIP when it does not cover its fees.
+ */
+export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, implied: number): TicketEconomics {
+  const chain = protocol.chains.length > 0 ? protocol.chains[0]! : '';
+  const hold = holdDaysFor(age);
+  const weeks = Math.floor(hold / 7);
+  const gas = 3 + 2 * gasTxUsd(chain) + 2 * weeks;
+  const forgone = TICKET_USD * TBILL_RATE * (hold / 365);
+  const tvl = Math.max(1, protocol.tvl_usd);
+  const slice = (TICKET_USD * TICKET_SHARE * implied) / tvl;
+  const net = slice - gas - forgone;
+  const minutes = 35 + 10 * weeks + 10 + 10;
+  const netPerHour = net / (minutes / 60);
+  const rate = TICKET_SHARE * (implied / tvl) - TBILL_RATE * (hold / 365);
+  return {
+    ticket_usd: TICKET_USD,
+    slice_usd: round2(slice),
+    gas_usd: round2(gas),
+    forgone_usd: round2(forgone),
+    net_usd: round2(net),
+    net_per_hour_usd: round2(netPerHour),
+    verdict: net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP',
+    pays_from_usd: rate > 0 ? Math.round(gas / rate) : null,
+    hold_days: hold,
+  };
+}
+
 /** The protocols the board ranks, strongest first, with ranks 1..n: every rankable pre-token protocol. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const comps = categoryComps(snapshot, model);
@@ -374,8 +307,164 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       breadth_multiplier: s.v.breadthMult,
       age_days: s.v.age,
     },
+    ticket: ticketEconomics(s.p, s.v.age, s.v.implied),
     farm_steps: farmSteps(s.p, s.v.age).map(stepText),
   }));
+}
+
+/** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
+export interface SnapshotProtocol {
+  slug: string;
+  name: string;
+  category: string | null;
+  chains: string[];
+  tvl_usd: number;
+  change_7d: number | null;
+  mcap_usd: number | null;
+  listed_at: string | null;
+  gecko_id: string | null;
+  symbol: string | null;
+}
+
+/** The whole snapshot document. */
+export interface Snapshot {
+  as_of: string;
+  source: string;
+  floor_usd: number;
+  protocols: SnapshotProtocol[];
+  watchlist: string[];
+}
+
+/** One live-token protocol behind a category's comp: its name and its own mcap/TVL. */
+export interface CompMember {
+  name: string;
+  ratio: number;
+}
+
+/** One category's comp: the live market's own mcap/TVL multiple. */
+export interface CategoryComp {
+  category: string;
+  live_count: number;
+  median_multiple: number;
+  used_global: boolean;
+  /** The five biggest live-token protocols in the category, by market cap, with their own ratios. */
+  members: CompMember[];
+}
+
+/** A farm step: the action, what it costs, and how long it takes. */
+export interface FarmStep {
+  text: string;
+  cost: string;
+  time: string;
+}
+
+/** One row of board.json: the ranked board's row. */
+export interface BoardRow {
+  rank: number;
+  slug: string;
+  name: string;
+  category: string | null;
+  chains: string[];
+  tvl_usd: number;
+  change_7d: number | null;
+  mcap_usd: number | null;
+  listed_at: string | null;
+  gecko_id: string | null;
+  symbol: string | null;
+  token_status: 'pre-token';
+  age_days: number | null;
+  implied_value_usd: number;
+  model: {
+    comp_category: string;
+    comp_multiple: number;
+    comp_live_count: number;
+    growth_pct: number;
+    growth_multiplier: number;
+    maturity_multiplier: number;
+    breadth_multiplier: number;
+    age_days: number | null;
+  };
+  /** What a $1,000 farm ticket in this row is worth: slice, gas, net, verdict. */
+  ticket: TicketEconomics;
+  farm_steps: string[];
+}
+
+/** A row's farm plan sized up in one line: what the seven steps cost in all. */
+export interface FarmSummary {
+  capital_usd: number;
+  gas: string;
+  hold_days: number;
+  setup_minutes: number;
+  weekly_gas: string;
+}
+
+/** The dashboard's compact view of one row. */
+export interface RadarRow {
+  rank: number;
+  slug: string;
+  name: string;
+  category: string | null;
+  chains: string[];
+  tvl_usd: number;
+  change_7d: number | null;
+  mcap_usd: number | null;
+  listed_at: string | null;
+  age_days: number | null;
+  implied_value_usd: number;
+  /** The implied value at the lowest and highest live-comp ratios in the category, or null when the category median was not used. */
+  implied_low_usd: number | null;
+  implied_high_usd: number | null;
+  comp_multiple: number;
+  comp_live_count: number;
+  comp_used_global: boolean;
+  comp_members: CompMember[];
+  growth_multiplier: number;
+  maturity_multiplier: number;
+  breadth_multiplier: number;
+  /** What a $1,000 farm ticket in this row is worth: slice, gas, net, verdict. */
+  ticket: TicketEconomics;
+  farm_summary: FarmSummary;
+  on_watchlist: boolean;
+}
+
+/** A live-token protocol: it already trades, so the board shows the market's own value. */
+export interface LiveRow {
+  slug: string;
+  name: string;
+  category: string | null;
+  chains: string[];
+  tvl_usd: number;
+  mcap_usd: number | null;
+  change_7d: number | null;
+}
+
+/** Everything the dashboard needs: the board, the live set, the comps and the model. */
+export interface RadarData {
+  as_of: string;
+  source: string;
+  floor_usd: number;
+  model: ModelConstants;
+  model_version: string;
+  watchlist_size: number;
+  board_size: number;
+  early_size: number;
+  live_size: number;
+  global_comp: number;
+  /** The board's implied values added up: the headline's answer. */
+  total_implied_usd: number;
+  /** How the $1,000 tickets came out: FARM pays after fees and the T-bill, THIN beats its fees only, SKIP does not cover them. */
+  verdict_counts: { farm: number; thin: number; skip: number };
+  comps: CategoryComp[];
+  rows: RadarRow[];
+  live: LiveRow[];
+}
+
+/** Why the snapshot is not one this model can score. */
+export class SnapshotError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SnapshotError';
+  }
 }
 
 const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
@@ -539,6 +628,18 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
 export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: number; comps: CategoryComp[] }): RadarRow {
   const table = new Map(comps.comps.map((c) => [c.category, c]));
   const compRow = row.category === null ? undefined : table.get(row.category);
+  // The range the row's implied value spans across its category's live
+  // comps: the same arithmetic at the lowest and highest member ratios.
+  // Only when the category median priced the row — a fallback row's single
+  // live comp is reference, not a range, so it shows the point alone.
+  let low: number | null = null;
+  let high: number | null = null;
+  if (compRow !== undefined && !compRow.used_global && compRow.members.length > 0) {
+    const ratios = compRow.members.map((m) => m.ratio);
+    const base = Math.max(1, row.tvl_usd) * row.model.growth_multiplier * row.model.maturity_multiplier * row.model.breadth_multiplier;
+    low = Math.max(1, Math.round(base * Math.min(...ratios)));
+    high = Math.max(1, Math.round(base * Math.max(...ratios)));
+  }
   return {
     rank: row.rank,
     slug: row.slug,
@@ -551,6 +652,8 @@ export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: num
     listed_at: row.listed_at,
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
+    implied_low_usd: low,
+    implied_high_usd: high,
     comp_multiple: row.model.comp_multiple,
     comp_live_count: compRow?.live_count ?? 0,
     comp_used_global: compRow?.used_global ?? true,
@@ -558,6 +661,7 @@ export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: num
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
+    ticket: row.ticket,
     farm_summary: farmSummary(
       { slug: row.slug, name: row.name, category: row.category, chains: row.chains, tvl_usd: row.tvl_usd, change_7d: row.change_7d, mcap_usd: row.mcap_usd, listed_at: row.listed_at, gecko_id: row.gecko_id, symbol: row.symbol },
       row.age_days,
@@ -573,6 +677,14 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const comps = categoryComps(snapshot, model);
   const watch = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watch.has(r.slug)).length;
+  const verdict_counts = { farm: 0, thin: 0, skip: 0 };
+  let total = 0;
+  for (const r of board) {
+    total += r.implied_value_usd;
+    if (r.ticket.verdict === 'FARM') verdict_counts.farm++;
+    else if (r.ticket.verdict === 'THIN') verdict_counts.thin++;
+    else verdict_counts.skip++;
+  }
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -584,6 +696,8 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     early_size: early,
     live_size: live.length,
     global_comp: round4(comps.global),
+    total_implied_usd: total,
+    verdict_counts,
     comps: comps.comps,
     rows: board.map((r) => radarRow(r, watch, comps)),
     live,
