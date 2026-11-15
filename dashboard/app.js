@@ -28,6 +28,9 @@
     return Math.max(0, Math.round(days)) + 'd';
   }
   function fmtMult(n) { return (Math.round(n * 100) / 100).toFixed(2) + 'x'; }
+  // Implied value per dollar of TVL, computed live from the row: three
+  // decimals below 0.1x so 0.065x reads as 0.065x, not 0.07x.
+  function fmtRatio(n) { if (!isFinite(n)) return 'n/a'; return (n < 0.1 ? n.toFixed(3) : (Math.round(n * 100) / 100).toFixed(2)) + 'x'; }
   function round2(n) { return Math.round(n * 100) / 100; }
   function fmtMoney(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -292,7 +295,6 @@
   // the screenshots first, so the arithmetic is visible in five seconds
   // without scrolling to the model panel below the table.
   function formulaBar() {
-    var m = DATA.model;
     var top = DATA.rows[0];
     var sc = DATA.size_curve;
     var v = DATA.validation;
@@ -300,14 +302,13 @@
       ? 'Rank 1 works out as ' + fmtUsd(top.curve_usd) + ' curve x ' + fmtMult(top.category_factor) + ' factor x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.'
       : '';
     var check = v
-      ? 'Leave-one-out on the ' + v.fitted.n + ' live-token protocols in this snapshot: median miss x' + v.fitted.median_miss.toFixed(2) + ', within 3x ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% — against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for one flat mcap/TVL multiple.'
+      ? 'Leave-one-out on ' + v.fitted.n + ' live tokens: median miss x' + v.fitted.median_miss.toFixed(2) + ', within 3x ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% — against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for one flat mcap/TVL multiple.'
       : '';
     return el('section', { class: 'formula-bar', 'aria-label': 'How implied value is computed' },
       el('div', { class: 'formula-line' },
-        el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x factor(category) x growth x maturity x breadth' }),
-        el('span', { text: ' growth is 1 + clamp(7d, ' + m.growth_floor + ', ' + m.growth_cap + ')/100 x ' + m.growth_weight + '; maturity runs ' + m.maturity_floor + ' to 1.00 over ' + m.maturity_days + ' days; breadth adds 2% per extra chain, at most 10%.' })
+        el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x factor(category) x growth x maturity x breadth' })
       ),
-      el('p', { text: 'The size curve is fitted on the ' + sc.live_count + ' live-token protocols in this same snapshot — a dollar of TVL is worth less at $5B than at $5M — and each category\'s factor is its live comps\' median residual off the curve, shrunk toward 1 when few comps. ' + example + ' ' + check })
+      el('p', { text: example + ' ' + check })
     );
   }
 
@@ -439,7 +440,7 @@
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: 'num ' + growthClass, text: growth }),
         el('td', { class: 'num', text: fmtAge(r.age_days) }),
-        el('td', { class: 'num' }, el('span', { text: fmtMult(r.comp_multiple) }), r.comp_used_global ? el('span', { class: 'sub global', text: ' global' }) : null),
+        el('td', { class: 'num', title: 'Flat baseline ' + fmtMult(r.comp_multiple) + (r.comp_used_global ? ' (global median)' : ' (category median)') }, el('span', { text: fmtRatio(r.tvl_usd ? r.implied_value_usd / r.tvl_usd : 0) })),
         el('td', null, el('div', { class: 'implied' },
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' }), range),
           el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
