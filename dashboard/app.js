@@ -29,16 +29,29 @@
   }
   function fmtMult(n) { return (Math.round(n * 100) / 100).toFixed(2) + 'x'; }
 
-  // The model in one function: the page recomputes a row from the snapshot
-  // figures and checks the number board.json carries, so the page's code
-  // and the board's data are visibly the same arithmetic.
+  // The model in one function, first in this file so the dossier text
+  // never cuts it: the page recomputes a row from the snapshot figures
+  // and the fitted curve, and checks the number board.json carries, so
+  // the page's code and the board's data are visibly the same arithmetic.
+  // The curve is fitted on the snapshot's live-token protocols — the
+  // size slope is read off the market, not hand-picked — and each
+  // category's factor is the live comps' median residual off the curve,
+  // shrunk toward 1 when the category has few live comps.
+  function curveFactorOf(category) {
+    if (!category) return 1;
+    for (var i = 0; i < (DATA.comps || []).length; i++) {
+      if (DATA.comps[i].category === category) return DATA.comps[i].curve_factor === undefined || DATA.comps[i].curve_factor === null ? 1 : DATA.comps[i].curve_factor;
+    }
+    return 1;
+  }
   function impliedOf(row, model) {
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * model.growth_weight;
     var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
     var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
     var breadth = 1 + Math.min(Math.max((row.chains || []).length - 1, 0), model.breadth_max_extra) * model.breadth_per_chain;
-    return Math.max(1, Math.round(row.tvl_usd * row.comp_multiple * growthMult * maturity * breadth));
+    var curve = Math.pow(10, DATA.size_curve.intercept) * Math.pow(Math.max(1, row.tvl_usd), DATA.size_curve.slope);
+    return Math.max(1, Math.round(curve * curveFactorOf(row.category) * growthMult * maturity * breadth));
   }
 
   function el(tag, attrs) {
@@ -208,7 +221,7 @@
     return el('section', { class: 'lede' },
       el('div', null,
         el('h1', { text: DATA.watchlist_size + ' watchlist protocols, ranked by implied value' }),
-        el('p', { html: 'The watchlist is the floor: every protocol with at least <b>$' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL and no token on record</b>. The early radar adds ' + DATA.early_size + ' pre-token protocols below that floor — every rankable one in the snapshot. Implied value is priced off the live market: each category is valued at its own median mcap/TVL. It is a model, not a promise.' })
+        el('p', { html: 'The watchlist is the floor: every protocol with at least <b>$' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL and no token on record</b>. The early radar adds ' + DATA.early_size + ' pre-token protocols below that floor — every rankable one in the snapshot. Implied value is priced off the live market: a size curve fitted on the live-token protocols in this snapshot prices each TVL, with a factor per category. It is a model, not a promise.' })
       ),
       el('div', { class: 'facts' },
         el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: DATA.watchlist_size + ' / ' + DATA.watchlist_size })),
@@ -225,15 +238,20 @@
   function formulaBar() {
     var m = DATA.model;
     var top = DATA.rows[0];
+    var sc = DATA.size_curve;
+    var v = DATA.validation;
     var example = top
-      ? 'Rank 1 works out as ' + fmtUsd(top.tvl_usd) + ' x ' + fmtMult(top.comp_multiple) + ' x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.'
+      ? 'Rank 1 works out as ' + fmtUsd(top.curve_usd) + ' curve x ' + fmtMult(top.category_factor) + ' factor x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.'
+      : '';
+    var check = v
+      ? 'Leave-one-out on the ' + v.fitted.n + ' live-token protocols in this snapshot: median miss x' + v.fitted.median_miss.toFixed(2) + ', within 3x ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% — against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for one flat mcap/TVL multiple.'
       : '';
     return el('section', { class: 'formula-bar', 'aria-label': 'How implied value is computed' },
       el('div', { class: 'formula-line' },
-        el('b', { text: 'implied = TVL x comp(category) x growth x maturity x breadth' }),
+        el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x factor(category) x growth x maturity x breadth' }),
         el('span', { text: ' growth is 1 + clamp(7d, ' + m.growth_floor + ', ' + m.growth_cap + ')/100 x ' + m.growth_weight + '; maturity runs ' + m.maturity_floor + ' to 1.00 over ' + m.maturity_days + ' days; breadth adds 2% per extra chain, at most 10%.' })
       ),
-      el('p', { text: 'comp(category) is the median mcap/TVL of the live-token protocols in that category, read off this same snapshot — never a hand-picked number. ' + example })
+      el('p', { text: 'The size curve is fitted on the ' + sc.live_count + ' live-token protocols in this same snapshot — a dollar of TVL is worth less at $5B than at $5M — and each category\'s factor is its live comps\' median residual off the curve, shrunk toward 1 when few comps. ' + example + ' ' + check })
     );
   }
 
@@ -246,7 +264,7 @@
           el('h3', { text: r.name }),
           el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') }),
           el('div', { class: 'val', text: fmtUsd(r.implied_value_usd) + ' implied' }),
-          el('span', { class: 'why', text: 'TVL ' + fmtUsd(r.tvl_usd) + ' at ' + fmtMult(r.comp_multiple) + ' comps, ' + fmtPct(r.change_7d) + ' in 7 days' })
+          el('span', { class: 'why', text: 'TVL ' + fmtUsd(r.tvl_usd) + ' curve ' + fmtUsd(r.curve_usd) + ' x ' + fmtMult(r.category_factor) + ', ' + fmtPct(r.change_7d) + ' in 7 days' })
         );
       })
     );
@@ -377,13 +395,15 @@
 
   function modelPanel() {
     var m = DATA.model;
+    var sc = DATA.size_curve;
+    var v = DATA.validation;
     return el('section', { class: 'panel model' },
       el('h2', { text: 'How implied value is computed' }),
       el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       el('div', { class: 'formula' },
-        'implied = round( tvl_usd x comp(category) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x breadth )'
+        'implied = round( 10^' + sc.intercept.toFixed(4) + ' x tvl_usd^' + sc.slope.toFixed(4) + ' x factor(category) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x breadth )'
       ),
-      el('p', { class: 'sub', text: 'comp(category) is the median mcap/TVL of the live-token protocols in that category in this same snapshot (global median ' + fmtMult(DATA.global_comp) + ' when a category has fewer than 3 live comps). Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Breadth adds 2% per extra chain, at most 10%. The early radar is every pre-token protocol below the watchlist floor, and the live-token protocols are set aside with their market caps shown.' })
+      el('p', { class: 'sub', text: 'The size curve is fitted on the ' + sc.live_count + ' live-token protocols in this snapshot by ordinary least squares on log market cap against log TVL (ratios winsorised to 0.01–5). factor(category) is the category\'s median residual off the curve, shrunk toward 1 by n/(n+3) when the category has few live comps; a category with no live-token protocol is priced by the curve alone. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Breadth adds 2% per extra chain, at most 10%. The flat category median (' + fmtMult(DATA.global_comp) + ' global) is the baseline the curve beat, not the price: leave-one-out on the same ' + v.fitted.n + ' live tokens gives the curve a median miss of x' + v.fitted.median_miss.toFixed(2) + ' with ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x, against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for the flat multiple.' })
     );
   }
 
@@ -395,16 +415,17 @@
         el('td', null, el('b', { text: c.category })),
         el('td', { class: 'num', text: String(c.live_count) }),
         el('td', { class: 'num', text: fmtMult(c.median_multiple) }),
+        el('td', { class: 'num', text: fmtMult(c.curve_factor) }),
         el('td', { class: 'num', text: c.used_global ? 'global median' : 'category median' }),
         el('td', { class: 'comps-members', text: names })
       ));
     });
     return el('section', { class: 'panel comps' },
       el('h2', { text: 'The comps behind the price' }),
-      el('p', { class: 'sub', text: 'Median mcap/TVL of live-token protocols in each category, read off this snapshot — with the live protocols that set each median, named. The twelve richest categories are shown; every other category is priced at the global median of ' + fmtMult(DATA.global_comp) + '.' }),
+      el('p', { class: 'sub', text: 'Median mcap/TVL of live-token protocols in each category, read off this snapshot — with the live protocols that set each median, named. The curve factor is the category\'s median residual off the fitted size curve, shrunk toward 1 when few live comps; the flat median beside it is the baseline the curve beat in leave-one-out. The twelve richest categories are shown; a category with no live-token protocol is priced by the curve alone (factor 1.00x).' }),
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Live comps' }), el('th', { scope: 'col', text: 'Median mcap/TVL' }), el('th', { scope: 'col', text: 'Source' }), el('th', { scope: 'col', text: 'Top live comps' }))),
+          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Live comps' }), el('th', { scope: 'col', text: 'Median mcap/TVL' }), el('th', { scope: 'col', text: 'Curve factor' }), el('th', { scope: 'col', text: 'Source' }), el('th', { scope: 'col', text: 'Top live comps' }))),
           tbody
         )
       )
@@ -441,7 +462,8 @@
       el('h3', { text: 'Implied value' }),
       el('div', { class: 'equation' },
         el('div', null, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
-        el('div', null, el('span', { text: 'Category comp' }), el('b', { class: 'num', text: fmtMult(row.comp_multiple) })),
+        el('div', null, el('span', { text: 'Size curve' }), el('b', { class: 'num', text: fmtUsd(row.curve_usd) })),
+        el('div', null, el('span', { text: 'Category factor' }), el('b', { class: 'num', text: fmtMult(row.category_factor) })),
         el('div', null, el('span', { text: 'Seven-day growth' }), el('b', { class: 'num', text: fmtPct(row.change_7d) })),
         el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: fmtMult(row.growth_multiplier) })),
         el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
@@ -451,25 +473,26 @@
       ),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
-    // Why this multiple: the live protocols the category's comp was read
-    // off, named with their own ratios — or an honest fallback note when
-    // the category was too thin and the global median priced the row.
+    // Why this value: the size curve at this TVL, the category's factor
+    // off the curve, and the live protocols the factor was read off —
+    // with an honest note when the category was too thin and the factor
+    // was shrunk toward 1.
     (function () {
       var members = row.comp_members || [];
       var cat = row.category || 'Other';
-      var head = row.comp_used_global
-        ? 'Only ' + row.comp_live_count + ' live-token protocol' + (row.comp_live_count === 1 ? '' : 's') + ' in ' + cat + ' — too thin to price a category, so the global median ' + fmtMult(DATA.global_comp) + ' prices this row instead of a category median.'
-        : cat + ' is priced at its own median mcap/TVL of ' + fmtMult(row.comp_multiple) + ', read off ' + row.comp_live_count + ' live-token protocols in this same snapshot.';
+      var head = row.factor_shrunk
+        ? 'Only ' + row.comp_live_count + ' live-token protocol' + (row.comp_live_count === 1 ? '' : 's') + ' in ' + cat + ' — too thin to set a category factor, so the factor ' + fmtMult(row.category_factor) + ' is shrunk toward 1.00x and the curve does most of the pricing.'
+        : cat + '\'s ' + row.comp_live_count + ' live-token protocols sit ' + fmtMult(row.category_factor) + ' off the size curve in this same snapshot, so the factor ' + fmtMult(row.category_factor) + ' adjusts the curve value.';
       var body = [el('p', { class: 'sub', text: head })];
       if (members.length > 0) {
         body.push(el('ul', { class: 'members' }, members.map(function (m) {
           return el('li', null, el('b', { text: m.name }), el('span', { text: ' ' + fmtMult(m.ratio) + ' mcap/TVL' }));
         })));
-        if (row.comp_used_global) body.push(el('p', { class: 'sub', text: 'The single live comp above is shown for reference: its own ratio is not the multiple used.' }));
+        body.push(el('p', { class: 'sub', text: 'The live comps above set the factor; the flat category median is ' + fmtMult(row.comp_multiple) + ' for comparison.' }));
       } else {
-        body.push(el('p', { class: 'sub', text: 'No live-token protocol in this category records a market cap, so nothing in the category prices it.' }));
+        body.push(el('p', { class: 'sub', text: 'No live-token protocol in this category records a market cap, so the curve alone prices it (factor 1.00x).' }));
       }
-      var sec = el('section', { class: 'detail-section' }, el('h3', { text: 'Why this multiple' }));
+      var sec = el('section', { class: 'detail-section' }, el('h3', { text: 'Why this value' }));
       body.forEach(function (b) { sec.appendChild(b); });
       dialog.appendChild(sec);
     })();

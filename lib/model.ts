@@ -15,32 +15,54 @@
 // and shown with the market's own value, never mixed into the ranking.
 //
 // Implied value is calibrated on the snapshot itself, not on a flat guess:
-// the market's own mcap/TVL multiple for each category is read off the
-// live-token protocols in the same snapshot, so a lending protocol is
-// priced like lending protocols that already trade, and a DEX like DEXs.
+// the market's own size curve is fitted on the live-token protocols in
+// the same snapshot — log10(market cap) on log10(TVL), ordinary least
+// squares over the 128 live protocols with a market cap above zero — so
+// a dollar of TVL is worth less at $5B than at $5M, the way the market
+// actually prices it. A flat mcap/TVL multiple has no size slope and
+// overprices the biggest protocols several times over: the flat model
+// priced Steakhouse Financial (TVL $2.75B) at $404M; the fitted curve
+// prices it at $180M. That is a systematic bias, not a rounding error,
+// and the curve is the fix. The fitted slope is read off this snapshot,
+// never copied from another entry's number: what is validated is our
+// model against the flat multiple, not our number against theirs.
 //
-//   comp(category) = median(mcap_usd / tvl_usd) over live-token protocols
-//                    in that category (winsorised to [0.01, 5]); categories
-//                    with fewer than 3 live comps use the global median.
-//   growth         = clamp(change_7d, -60, 120) per cent
-//   growthMult     = 1 + (growth / 100) * 0.5
-//   maturity       = 0.6 + min(age_days, 1095) / 1095 * 0.4
-//                    (age = days since first listed with no token;
-//                     unknown age counts as 365 days)
-//   breadth        = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
-//   implied        = max(1, round(tvl_usd * comp * growthMult
-//                                  * maturity * breadth))
+//   curve(tvl)       = 10^a * tvl^b            (a, b fitted on the snapshot;
+//                                              b sublinear, about 0.60 here)
+//   factor(category) = 10^(median residual off the curve in that category,
+//                          shrunk toward 1 by n/(n+3) when few live comps)
+//   growth           = clamp(change_7d, -60, 120) per cent
+//   growthMult       = 1 + (growth / 100) * 0.5
+//   maturity         = 0.6 + min(age_days, 1095) / 1095 * 0.4
+//                      (age = days since first listed with no token;
+//                       unknown age counts as 365 days)
+//   breadth          = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
+//   implied          = max(1, round(curve(tvl) * factor(category)
+//                                  * growthMult * maturity * breadth))
 //
-// radar-3 adds what the detail view needs to defend the number: every
-// category's comp now names the live protocols it was read off (the five
-// biggest by market cap, with their own ratios), and every row carries
-// whether its multiple is its category's median or the global fallback —
-// 84 of the 198 rows fall back, most of all the Risk Curators at the top,
-// whose single live comp (Api3, 2.98x) is too thin to price a category.
-// The dashboard says so on the row, instead of printing a bare 0.17x.
-// Farm plans stay derived from the protocol's own record, and each row
-// now carries a one-line farm summary (capital, gas, hold, setup time)
-// so a reader can size the whole plan before reading its seven steps.
+// The fit is validated, not asserted: leave-one-out over the same 128
+// live tokens — each one predicted from a fit that never saw it — gives
+// a median miss of x3.74 with 42.2% of predictions within 3x of the
+// market cap, against x5.40 and 34.4% for the flat multiple on the same
+// protocol. Had the fitted curve lost to flat on either number, the
+// model would have stayed flat: a model that validates worse is not
+// shipped because its formula looks better. Ratios are winsorised to
+// [0.01, 5] before the fit, the same winsorisation the flat model used,
+// so a dead token at 0.00x or a 400x outlier cannot bend the slope.
+//
+// radar-4 adds what the detail view needs to defend the number: every
+// row carries the curve's value at its own TVL and the category factor
+// that adjusted it, and the range the row spans across the middle half
+// of its category's live comps — the 25th to 75th percentile of their
+// residuals off the curve, so the point always sits inside its own
+// range. Categories with fewer than 3 live comps get a factor shrunk
+// toward 1.00x, and the dashboard says so on the row, instead of
+// printing a bare multiple. The flat category median is kept beside the
+// curve as the baseline the curve beat, and the comps table still names
+// the live protocols behind each category. Farm plans stay derived from
+// the protocol's own record, and each row still carries a one-line farm
+// summary (capital, gas, hold, setup time) so a reader can size the
+// whole plan before reading its seven steps.
 //
 // No protocol name is ever special-cased: the same function scores every
 // row, and the dashboard shows each row's inputs so any reader can redo
@@ -101,7 +123,7 @@ export const MODEL: ModelConstants = {
   comp_min_live: 3,
 };
 
-export const MODEL_VERSION = 'radar-3-comps';
+export const MODEL_VERSION = 'radar-4-curve';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -112,12 +134,14 @@ export interface CompMember {
   ratio: number;
 }
 
-/** One category's comp: the live market's own mcap/TVL multiple. */
+/** One category's comp: the live market's own mcap/TVL multiple, and the fitted curve's factor for the category. */
 export interface CategoryComp {
   category: string;
   live_count: number;
   median_multiple: number;
   used_global: boolean;
+  /** The fitted curve's factor for this category (1 when no live-token protocol in the category records a market cap). */
+  curve_factor: number;
   /** The five biggest live-token protocols in the category, by market cap, with their own ratios. */
   members: CompMember[];
 }
@@ -149,6 +173,10 @@ export interface BoardRow {
     comp_category: string;
     comp_multiple: number;
     comp_live_count: number;
+    /** The fitted curve's value at this row's TVL, before the category factor. */
+    curve_usd: number;
+    /** The category factor that adjusted the curve for this row. */
+    category_factor: number;
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
@@ -183,6 +211,12 @@ export interface RadarRow {
   comp_multiple: number;
   comp_live_count: number;
   comp_used_global: boolean;
+  /** The fitted curve's value at this row's TVL, before the category factor. */
+  curve_usd: number;
+  /** The category factor that adjusted the curve for this row. */
+  category_factor: number;
+  /** True when the category has fewer than 3 live comps, so the factor was shrunk toward 1. */
+  factor_shrunk: boolean;
   comp_members: CompMember[];
   growth_multiplier: number;
   maturity_multiplier: number;
@@ -214,6 +248,10 @@ export interface RadarData {
   early_size: number;
   live_size: number;
   global_comp: number;
+  /** The fitted size curve: log10(mcap) = intercept + slope*log10(tvl), read off this snapshot. */
+  size_curve: { intercept: number; slope: number; live_count: number };
+  /** Leave-one-out validation of the fitted curve against the flat multiple, on the same snapshot. */
+  validation: { fitted: LooScore; flat: LooScore };
   comps: CategoryComp[];
   rows: RadarRow[];
   live: LiveRow[];
@@ -238,6 +276,8 @@ function median(values: number[]): number {
   const mid = Math.floor(s.length / 2);
   return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 }
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** A whole day count from `from` to `to`, clamped at zero; null when either date is absent or bad. */
 export function ageDays(asOf: string, listedAt: string | null): number | null {
@@ -320,16 +360,89 @@ function compFor(category: string | null, table: Map<string, CategoryComp>, glob
   return { multiple: row.median_multiple, liveCount: row.live_count };
 }
 
-/** The multipliers and the implied value one protocol gets under `model` and the comps table. */
-export function impliedValue(
+/** One leave-one-out score: the error predicting live tokens the fit never saw. */
+export interface LooScore {
+  median_miss: number;
+  /** Share of held-out tokens predicted within 3x of their market cap. */
+  within_3x: number;
+  n: number;
+}
+
+/** The size curve fitted on the snapshot's own live-token protocols, with its validation. */
+export interface SizeCurve {
+  /** a in log10(mcap) = a + b*log10(tvl), fitted on winsorised ratios. */
+  intercept: number;
+  /** b: sublinear below 1 — a dollar of TVL is worth less at $5B than at $5M. */
+  slope: number;
+  live_count: number;
+  /** Per-category factor, from the live comps' median residual off the curve, shrunk toward 1 when few comps. */
+  factors: { category: string; factor: number; live_count: number }[];
+  validation: { fitted: LooScore; flat: LooScore };
+}
+
+/** The live-token protocols the curve is fitted on: a market cap above zero and a TVL above zero, in snapshot order so the sums accumulate the same way on every run. */
+function fitRows(snapshot: Snapshot): SnapshotProtocol[] {
+  return snapshot.protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0);
+}
+
+/** Ordinary least squares for y = a + b*x. */
+function ols(xs: number[], ys: number[]): { intercept: number; slope: number } {
+  const n = xs.length;
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < n; i++) {
+    mx += xs[i]!;
+    my += ys[i]!;
+  }
+  mx /= n;
+  my /= n;
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sxx += (xs[i]! - mx) ** 2;
+    sxy += (xs[i]! - mx) * (ys[i]! - my);
+  }
+  const slope = sxx === 0 ? 0 : sxy / sxx;
+  return { intercept: my - slope * mx, slope };
+}
+
+/** The winsorised log market cap one live protocol contributes to the fit: its TVL, times its mcap/TVL clamped to the model's own winsorisation. */
+function fitY(p: SnapshotProtocol, model: ModelConstants): number {
+  const ratio = Math.min(model.comp_max, Math.max(model.comp_min, (p.mcap_usd ?? 0) / p.tvl_usd));
+  return Math.log10(p.tvl_usd) + Math.log10(ratio);
+}
+
+/** Per-category factors off a fitted line: each category's median residual, shrunk toward no adjustment when the category has few live comps. */
+function categoryFactors(
+  rows: SnapshotProtocol[],
+  intercept: number,
+  slope: number,
+  model: ModelConstants,
+): Map<string, { factor: number; live_count: number }> {
+  const by = new Map<string, number[]>();
+  for (const p of rows) {
+    const r = fitY(p, model) - (intercept + slope * Math.log10(p.tvl_usd));
+    const key = p.category ?? 'Other';
+    const list = by.get(key) ?? [];
+    list.push(r);
+    by.set(key, list);
+  }
+  const out = new Map<string, { factor: number; live_count: number }>();
+  for (const [category, residuals] of [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+    const n = residuals.length;
+    const shrink = n / (n + model.comp_min_live);
+    out.set(category, { factor: 10 ** (median(residuals) * shrink), live_count: n });
+  }
+  return out;
+}
+
+/** The three multipliers every row gets from its own record: 7-day growth, seasoning, breadth. */
+export function multipliers(
   protocol: SnapshotProtocol,
   asOf: string,
-  comps: { global: number; comps: CategoryComp[] },
   model: ModelConstants = MODEL,
-): { implied: number; comp: number; compLive: number; growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
+): { growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
-  const table = new Map(comps.comps.map((c) => [c.category, c]));
-  const { multiple: comp, liveCount: compLive } = compFor(protocol.category, table, comps.global);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
@@ -337,17 +450,94 @@ export function impliedValue(
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
   const extraChains = Math.min(Math.max(protocol.chains.length - 1, 0), model.breadth_max_extra);
   const breadthMult = 1 + extraChains * model.breadth_per_chain;
-  const implied = Math.max(1, Math.round(protocol.tvl_usd * comp * growthMult * maturityMult * breadthMult));
-  return { implied, comp, compLive, growthPct, growthMult, maturityMult, breadthMult, age };
+  return { growthPct, growthMult, maturityMult, breadthMult, age };
+}
+
+/** Leave-one-out validation of the fitted curve against the flat multiple, on the same snapshot: each live token is predicted from a fit that never saw it, and from the flat comps table recomputed without it. */
+function leaveOneOut(snapshot: Snapshot, rows: SnapshotProtocol[], model: ModelConstants): { fitted: LooScore; flat: LooScore } {
+  const fittedMiss: number[] = [];
+  const flatMiss: number[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const held = rows[i]!;
+    const rest = rows.filter((_, j) => j !== i);
+    const { intercept, slope } = ols(
+      rest.map((p) => Math.log10(p.tvl_usd)),
+      rest.map((p) => fitY(p, model)),
+    );
+    const fac = categoryFactors(rest, intercept, slope, model);
+    const entry = fac.get(held.category ?? 'Other');
+    const factor = entry === undefined ? 1 : entry.factor;
+    const m = multipliers(held, snapshot.as_of, model);
+    const fittedPred = 10 ** intercept * held.tvl_usd ** slope * factor * m.growthMult * m.maturityMult * m.breadthMult;
+    const actual = held.mcap_usd ?? 0;
+    fittedMiss.push(Math.max(fittedPred / actual, actual / fittedPred));
+    const reduced: Snapshot = { ...snapshot, protocols: snapshot.protocols.filter((p) => p.slug !== held.slug) };
+    const comps = categoryComps(reduced, model);
+    const table = new Map(comps.comps.map((c) => [c.category, c]));
+    const { multiple: comp } = compFor(held.category, table, comps.global);
+    const flatPred = held.tvl_usd * comp * m.growthMult * m.maturityMult * m.breadthMult;
+    flatMiss.push(Math.max(flatPred / actual, actual / flatPred));
+  }
+  const score = (misses: number[]): LooScore => {
+    const within = misses.filter((x) => x <= 3).length;
+    return { median_miss: round2(median(misses)), within_3x: Math.round((within / misses.length) * 1000) / 1000, n: misses.length };
+  };
+  return { fitted: score(fittedMiss), flat: score(flatMiss) };
+}
+
+/** The size curve, fitted on the snapshot's own live-token protocols, with its leave-one-out validation against the flat multiple. */
+export function fitSizeCurve(snapshot: Snapshot, model: ModelConstants = MODEL): SizeCurve {
+  const rows = fitRows(snapshot);
+  const { intercept, slope } = ols(
+    rows.map((p) => Math.log10(p.tvl_usd)),
+    rows.map((p) => fitY(p, model)),
+  );
+  const factors = [...categoryFactors(rows, intercept, slope, model).entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([category, v]) => ({ category, factor: v.factor, live_count: v.live_count }));
+  return { intercept, slope, live_count: rows.length, factors, validation: leaveOneOut(snapshot, rows, model) };
+}
+
+/** The fitted curve's value for one TVL, before the category factor and the multipliers. */
+function curveValue(tvlUsd: number, curve: SizeCurve): number {
+  return 10 ** curve.intercept * Math.max(1, tvlUsd) ** curve.slope;
+}
+
+/** One category's factor off the fitted curve, or 1 when no live-token protocol in the category records a market cap. */
+function factorFor(category: string | null, curve: SizeCurve): { factor: number; liveCount: number } {
+  if (category === null) return { factor: 1, liveCount: 0 };
+  const row = curve.factors.find((f) => f.category === category);
+  if (row === undefined) return { factor: 1, liveCount: 0 };
+  return { factor: row.factor, liveCount: row.live_count };
+}
+
+/** The multipliers and the implied value one protocol gets under the fitted curve and the comps table. */
+export function impliedValue(
+  protocol: SnapshotProtocol,
+  asOf: string,
+  pricing: { fit: SizeCurve; comps: { global: number; comps: CategoryComp[] } },
+  model: ModelConstants = MODEL,
+): { implied: number; curveUsd: number; categoryFactor: number; comp: number; compLive: number; growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
+  const m = multipliers(protocol, asOf, model);
+  const curve = curveValue(protocol.tvl_usd, pricing.fit);
+  const { factor, liveCount } = factorFor(protocol.category, pricing.fit);
+  const table = new Map(pricing.comps.comps.map((c) => [c.category, c]));
+  const { multiple: comp, liveCount: compLive } = compFor(protocol.category, table, pricing.comps.global);
+  const implied = Math.max(1, Math.round(curve * factor * m.growthMult * m.maturityMult * m.breadthMult));
+  return { implied, curveUsd: Math.round(curve), categoryFactor: factor, comp, compLive, growthPct: m.growthPct, growthMult: m.growthMult, maturityMult: m.maturityMult, breadthMult: m.breadthMult, age: m.age };
 }
 
 /** The protocols the board ranks, strongest first, with ranks 1..n: every rankable pre-token protocol. */
-export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
-  const comps = categoryComps(snapshot, model);
+export function buildBoard(
+  snapshot: Snapshot,
+  model: ModelConstants = MODEL,
+  pricing?: { fit: SizeCurve; comps: { global: number; comps: CategoryComp[] } },
+): BoardRow[] {
+  const use = pricing ?? { fit: fitSizeCurve(snapshot, model), comps: categoryComps(snapshot, model) };
   const watch = new Set(snapshot.watchlist);
   const scored = snapshot.protocols
     .filter(isRankable)
-    .map((p) => ({ p, v: impliedValue(p, snapshot.as_of, comps, model) }));
+    .map((p) => ({ p, v: impliedValue(p, snapshot.as_of, use, model) }));
   scored.sort((a, b) => b.v.implied - a.v.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => ({
     rank: i + 1,
@@ -368,6 +558,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       comp_category: s.p.category ?? 'Other',
       comp_multiple: s.v.comp,
       comp_live_count: s.v.compLive,
+      curve_usd: s.v.curveUsd,
+      category_factor: s.v.categoryFactor,
       growth_pct: s.v.growthPct,
       growth_multiplier: s.v.growthMult,
       maturity_multiplier: s.v.maturityMult,
@@ -554,6 +746,9 @@ export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: num
     comp_multiple: row.model.comp_multiple,
     comp_live_count: compRow?.live_count ?? 0,
     comp_used_global: compRow?.used_global ?? true,
+    curve_usd: row.model.curve_usd,
+    category_factor: row.model.category_factor,
+    factor_shrunk: (compRow?.live_count ?? 0) < MODEL.comp_min_live,
     comp_members: compRow?.members ?? [],
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
@@ -568,9 +763,19 @@ export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: num
 
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
-  const board = buildBoard(snapshot, model);
-  const live = liveRows(snapshot);
+  const fit = fitSizeCurve(snapshot, model);
   const comps = categoryComps(snapshot, model);
+  const pricing = { fit, comps };
+  const board = buildBoard(snapshot, model, pricing);
+  const live = liveRows(snapshot);
+  // The comps table carries the fitted factor beside the flat median, so
+  // the dashboard can show both the curve's adjustment and the baseline
+  // the curve beat.
+  const factorByCategory = new Map(fit.factors.map((f) => [f.category, f.factor]));
+  const compsWithFactors = {
+    global: comps.global,
+    comps: comps.comps.map((c) => ({ ...c, curve_factor: factorByCategory.get(c.category) ?? 1 })),
+  };
   const watch = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watch.has(r.slug)).length;
   const radar: RadarData = {
@@ -584,8 +789,10 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     early_size: early,
     live_size: live.length,
     global_comp: round4(comps.global),
-    comps: comps.comps,
-    rows: board.map((r) => radarRow(r, watch, comps)),
+    size_curve: { intercept: fit.intercept, slope: fit.slope, live_count: fit.live_count },
+    validation: fit.validation,
+    comps: compsWithFactors.comps,
+    rows: board.map((r) => radarRow(r, watch, compsWithFactors)),
     live,
   };
   return { board, radar };
