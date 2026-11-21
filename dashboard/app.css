@@ -66,7 +66,9 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .name b{font-size:13px;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .name .sub{color:var(--muted);font-size:12px;max-width:100px;overflow:hidden;text-overflow:ellipsis}
 .global{font-size:11px;color:var(--faint)}
-.implied{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:130px}
+.implied{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:170px}
+.rng-text{display:flex;flex-direction:column;line-height:1.25;white-space:nowrap}
+.rng-text .sub{color:var(--muted);font-size:11.5px}
 .bar{position:relative;flex:1;height:8px;background:#1c2f47;border-radius:99px;overflow:hidden}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--blue))}
 .bar .rng{position:absolute;top:3px;height:2px;background:var(--ink);opacity:.55;border-radius:2px}
@@ -89,6 +91,9 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .button.primary{background:var(--teal);border-color:var(--teal);color:#04211d;font-weight:700}
 .model{padding:16px 18px}
 .model h2,.comps h2{margin:0 0 6px;font-size:18px}
+.model h3{margin:10px 0 4px;font-size:14px}
+.model table{font-size:13px}
+.model td,.model th{padding:4px 10px}
 .model p,.comps p{color:var(--muted);margin:6px 0}
 .formula{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;overflow-x:auto;white-space:nowrap}
 .comps{padding:16px 18px}
