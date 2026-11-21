@@ -31,10 +31,11 @@
   // Implied value per dollar of TVL, computed live from the row: three
   // decimals below 0.1x so 0.065x reads as 0.065x, not 0.07x.
   function fmtRatio(n) { if (!isFinite(n)) return 'n/a'; return (n < 0.1 ? n.toFixed(3) : (Math.round(n * 100) / 100).toFixed(2)) + 'x'; }
-  // A row's implied range as one line, or its point alone when the
-  // category was too thin to set a range (fallback rows carry no
-  // low/high — the model prices them by the global median, so there is
-  // no range to show).
+  // A row's implied range as one line: the middle half of its
+  // category's live comps around the fitted curve. A category too thin
+  // to set its own band uses the whole market's spread, so every row
+  // has a range; the point alone is only a defensive fallback for
+  // data written before bands existed.
   function hasRange(r) {
     return r.implied_low_usd !== null && r.implied_low_usd !== undefined && r.implied_high_usd !== null && r.implied_high_usd !== undefined;
   }
@@ -301,14 +302,14 @@
     var tr = totalRange();
     return el('section', { class: 'lede' },
       el('div', null,
-        el('h1', { text: DATA.board_size + ' protocols record no token — the market\u2019s own size curve prices them at ' + fmtUsd(tr.low) + '–' + fmtUsd(tr.high) }),
+        el('h1', { text: DATA.board_size + ' protocols record no token — the market\u2019s own size curve prices them at ' + fmtUsd(DATA.total_implied_usd) }),
         el('p', { html: 'Every protocol DefiLlama tracks with no token, priced off the ones that already trade — a size curve fitted on the live-token protocols in this snapshot prices each TVL, with a factor per category. It is a model, not a promise.' }),
         el('p', { class: 'verdict-line', html: '<b>$1,000</b> ticket: <b class="farm">FARM ' + vc.farm + '</b> pay after fees + 4% T-bill · <b class="thin">THIN ' + vc.thin + '</b> beat fees only · <b class="skipv">SKIP ' + vc.skip + '</b> fees eat the drop.' })
       ),
       el('div', { class: 'facts' },
         el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: DATA.watchlist_size + ' / ' + DATA.watchlist_size + ' · $' + Math.round(DATA.floor_usd / 1e6) + 'M+' })),
         el('div', { class: 'fact' }, el('span', { text: 'Pre-token rows scored' }), el('b', { text: String(DATA.board_size) })),
-        el('div', { class: 'fact' }, el('span', { text: 'Total implied value' }), el('b', { text: fmtUsd(tr.low) + '–' + fmtUsd(tr.high) }), el('span', { text: 'point ' + fmtUsd(DATA.total_implied_usd) })),
+        el('div', { class: 'fact' }, el('span', { text: 'Total implied value' }), el('b', { text: fmtUsd(DATA.total_implied_usd) }), el('span', { text: 'range ' + fmtUsd(tr.low) + '–' + fmtUsd(tr.high) })),
         el('div', { class: 'fact' }, el('span', { text: 'Live-token protocols set aside' }), el('b', { text: String(DATA.live_size) }))
       )
     );
@@ -325,13 +326,14 @@
       ? 'Rank 1 works out as ' + fmtUsd(top.curve_usd) + ' curve x ' + fmtMult(top.category_factor) + ' factor x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.'
       : '';
     var check = v
-      ? 'Leave-one-out on ' + v.fitted.n + ' live tokens: median miss x' + v.fitted.median_miss.toFixed(2) + ', within 3x ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% — against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for one flat mcap/TVL multiple.'
+      ? 'LOO on ' + v.fitted.n + ' live tokens: x' + v.fitted.median_miss.toFixed(2) + ' median miss, ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x — vs x' + v.flat.median_miss.toFixed(2) + ' / ' + Math.round(v.flat.within_3x * 1000) / 10 + '% flat.'
       : '';
+    var bandDef = 'Each row\u2019s range is the middle half of its category\u2019s live comps around the fitted curve — the point always sits inside it.';
     return el('section', { class: 'formula-bar', 'aria-label': 'How implied value is computed' },
       el('div', { class: 'formula-line' },
         el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x factor(category) x growth x maturity x breadth' })
       ),
-      el('p', { text: example + ' ' + check })
+      el('p', { text: example + ' ' + check + ' ' + bandDef })
     );
   }
 
@@ -343,7 +345,7 @@
           el('span', { class: 'rank', text: 'Rank ' + r.rank }),
           el('h3', { text: r.name }),
           el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') }),
-          el('div', { class: 'val', text: fmtRange(r) + ' implied' }),
+          el('div', { class: 'val', text: fmtUsd(r.implied_value_usd) + ' implied' }),
           el('span', { class: 'why', text: 'TVL ' + fmtUsd(r.tvl_usd) + ' curve ' + fmtUsd(r.curve_usd) + ' x ' + fmtMult(r.category_factor) + ', ' + fmtPct(r.change_7d) + ' in 7 days' })
         );
       })
@@ -466,7 +468,8 @@
         el('td', { class: 'num', title: 'Flat baseline ' + fmtMult(r.comp_multiple) + (r.comp_used_global ? ' (global median)' : ' (category median)') }, el('span', { text: fmtRatio(r.tvl_usd ? r.implied_value_usd / r.tvl_usd : 0) })),
         el('td', null, el('div', { class: 'implied' },
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' }), range),
-          el('span', { class: 'num rng-val', title: hasRange(r) ? 'Point ' + fmtUsd(r.implied_value_usd) : 'Point value — no range: category too thin', text: fmtRange(r) })
+          el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) }),
+          el('span', { class: 'rng-sub', title: 'Range: the middle half of the category\u2019s live comps around the fitted curve', text: fmtRange(r) })
         )),
         el('td', { class: 'num', text: fmtMoney(t.slice_usd) }),
         el('td', { class: 'num ' + (t.net_per_hour_usd >= 0 ? 'pos' : 'neg'), text: netText }),
@@ -487,7 +490,7 @@
             sortHeader('growth', '7d'),
             sortHeader('age', 'Age'),
             el('th', { scope: 'col', text: 'Mult' }),
-            sortHeader('implied', 'Implied range'),
+            sortHeader('implied', 'Implied value'),
             sortHeader('slice', '$1K slice'),
             sortHeader('net', 'Net $/h'),
             el('th', { scope: 'col', text: 'Verdict' }),
@@ -532,7 +535,7 @@
       el('div', { class: 'formula' },
         'implied = round( 10^' + sc.intercept.toFixed(4) + ' x tvl_usd^' + sc.slope.toFixed(4) + ' x factor(category) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x breadth )'
       ),
-      el('p', { class: 'sub', text: 'The size curve is fitted on the ' + sc.live_count + ' live-token protocols in this snapshot by ordinary least squares on log market cap against log TVL (ratios winsorised to 0.01–5). factor(category) is the category\'s median residual off the curve, shrunk toward 1 by n/(n+3) when the category has few live comps; a category with no live-token protocol is priced by the curve alone. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Breadth adds 2% per extra chain, at most 10%. The flat category median (' + fmtMult(DATA.global_comp) + ' global) is the baseline the curve beat, not the price: leave-one-out on the same ' + v.fitted.n + ' live tokens gives the curve a median miss of x' + v.fitted.median_miss.toFixed(2) + ' with ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x, against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for the flat multiple.' })
+      el('p', { class: 'sub', text: 'The size curve is fitted on the ' + sc.live_count + ' live-token protocols in this snapshot by ordinary least squares on log market cap against log TVL (ratios winsorised to 0.01–5). factor(category) is the category\'s median residual off the curve, shrunk toward 1 by n/(n+3) when the category has few live comps; a category with no live-token protocol is priced by the curve alone. Each row also carries a range: the middle half of its category\'s live comps around the fitted curve (25th–75th percentile of their residuals), expanded to contain the point; a category too thin to set its own band uses the whole market\'s spread. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Breadth adds 2% per extra chain, at most 10%. The flat category median (' + fmtMult(DATA.global_comp) + ' global) is the baseline the curve beat, not the price: leave-one-out on the same ' + v.fitted.n + ' live tokens gives the curve a median miss of x' + v.fitted.median_miss.toFixed(2) + ' with ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x, against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for the flat multiple.' })
     );
   }
 
@@ -591,8 +594,8 @@
       ),
       el('button', { class: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: function () { dialog.close(); } })
     ));
-    var rangeText = (row.implied_low_usd !== null && row.implied_low_usd !== undefined && row.implied_high_usd !== null && row.implied_high_usd !== undefined)
-      ? ' Range across the category\u2019s live comps: ' + fmtUsd(row.implied_low_usd) + ' \u2013 ' + fmtUsd(row.implied_high_usd) + '.'
+    var rangeText = hasRange(row)
+      ? ' Range: the middle half of the category\u2019s live comps around the fitted curve, ' + fmtUsd(row.implied_low_usd) + ' \u2013 ' + fmtUsd(row.implied_high_usd) + '.' + (row.band_used_global ? ' Too few comps in this category, so the band uses the whole market\u2019s spread.' : '')
       : '';
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Implied value' }),
@@ -606,8 +609,8 @@
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: fmtMult(row.maturity_multiplier) })),
         el('div', null, el('span', { text: 'Breadth multiplier' }), el('b', { class: 'num', text: fmtMult(row.breadth_multiplier) })),
         el('div', { class: 'total' }, el('span', { text: 'Implied value' }), el('div', null,
-          el('b', { class: 'num', text: fmtRange(row) }),
-          hasRange(row) ? el('span', { class: 'pt-sub', text: 'point ' + fmtUsd(row.implied_value_usd) }) : null
+          el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }),
+          el('span', { class: 'pt-sub', text: 'range ' + fmtRange(row) })
         ))
       ),
       el('p', { class: 'sub', text: 'Seven-day growth ' + fmtPct(row.change_7d) + '; age with no token ' + fmtAge(row.age_days) + '.' + rangeText }),

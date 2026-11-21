@@ -67,8 +67,8 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .name .sub{color:var(--muted);font-size:12px;max-width:100px;overflow:hidden;text-overflow:ellipsis}
 .global{font-size:11px;color:var(--faint)}
 .implied{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:150px}
-.rng-val{white-space:nowrap}
-.bar{position:relative;flex:1;height:8px;background:#1c2f47;border-radius:99px;overflow:hidden}
+.rng-sub{color:var(--muted);font-size:11px;white-space:nowrap}
+.bar{position:relative;flex:1 1 32px;min-width:32px;height:8px;background:#1c2f47;border-radius:99px;overflow:hidden}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--blue))}
 .bar .rng{position:absolute;top:3px;height:2px;background:var(--ink);opacity:.55;border-radius:2px}
 .status{display:inline-block;border-radius:99px;padding:2px 9px;font-size:12px;font-weight:700;background:#3b2f10;color:var(--amber);white-space:nowrap}
@@ -106,7 +106,7 @@ dialog.detail::backdrop{background:rgba(2,6,16,.72)}
 .detail-head h2{margin:0 0 2px;font-size:18px}
 .detail-head .sub{color:var(--muted);margin:0}
 .close{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer;height:fit-content}
-.detail-section{padding:6px 20px;border-top:1px solid var(--line);margin-top:6px}
+.detail-section{padding:4px 20px;border-top:1px solid var(--line);margin-top:2px}
 .detail-section h3{margin:0 0 3px;font-size:14px}
 .detail-section .sub{color:var(--muted);font-size:13px;margin:4px 0}
 .equation{display:grid;grid-template-columns:1fr 1fr;gap:2px 28px}

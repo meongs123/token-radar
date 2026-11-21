@@ -69,7 +69,9 @@
 // that adjusted it, and the range the row spans across the middle half
 // of its category's live comps — the 25th to 75th percentile of their
 // residuals off the curve, so the point always sits inside its own
-// range. Categories with fewer than 3 live comps get a factor shrunk
+// range. Categories too thin to set their own band use the whole
+// market's spread, so every row carries a range, and the dashboard says
+// so on the row. Categories with fewer than 3 live comps get a factor shrunk
 // toward 1.00x, and the dashboard says so on the row, instead of
 // printing a bare multiple. The flat category median is kept beside the
 // curve as the baseline the curve beat, and the comps table still names
@@ -224,9 +226,11 @@ export interface RadarRow {
   listed_at: string | null;
   age_days: number | null;
   implied_value_usd: number;
-  /** The implied value at the lowest and highest live-comp ratios in the category, or null when the category median was not used. */
+  /** The row's range: the middle half of its category's live comps around the fitted curve (25th–75th percentile of their residuals), expanded to contain the point — always set, every row carries a band. */
   implied_low_usd: number | null;
   implied_high_usd: number | null;
+  /** True when the category was too thin to set its own band, so the band uses the whole market's spread. */
+  band_used_global: boolean;
   comp_multiple: number;
   comp_live_count: number;
   comp_used_global: boolean;
@@ -451,6 +455,10 @@ export interface SizeCurve {
   live_count: number;
   /** Per-category factor, from the live comps' median residual off the curve, shrunk toward 1 when few comps. */
   factors: { category: string; factor: number; live_count: number }[];
+  /** Per-category residual band: the middle half (25th–75th percentile) of the category's live comps' residuals off the curve, in log10. */
+  bands: { category: string; p25: number; p75: number; live_count: number }[];
+  /** The market-wide residual band, for categories too thin to set their own. */
+  globalBand: { p25: number; p75: number; live_count: number };
   validation: { fitted: LooScore; flat: LooScore };
 }
 
@@ -508,6 +516,38 @@ function categoryFactors(
     out.set(category, { factor: 10 ** (median(residuals) * shrink), live_count: n });
   }
   return out;
+}
+
+/** A quantile of a sorted array by linear interpolation (type-7): q in [0, 1]. */
+function quantile(sorted: number[], q: number): number {
+  const n = sorted.length;
+  if (n === 0) return NaN;
+  if (n === 1) return sorted[0]!;
+  const pos = (n - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo]!;
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
+}
+
+/** Every live token's residual off the fitted line, per category and pooled across the market — the same winsorised residuals categoryFactors reads. */
+function residualLists(
+  rows: SnapshotProtocol[],
+  intercept: number,
+  slope: number,
+  model: ModelConstants,
+): { byCategory: Map<string, number[]>; global: number[] } {
+  const byCategory = new Map<string, number[]>();
+  const global: number[] = [];
+  for (const p of rows) {
+    const r = fitY(p, model) - (intercept + slope * Math.log10(p.tvl_usd));
+    const key = p.category ?? 'Other';
+    const list = byCategory.get(key) ?? [];
+    list.push(r);
+    byCategory.set(key, list);
+    global.push(r);
+  }
+  return { byCategory, global };
 }
 
 /** The three multipliers every row gets from its own record: 7-day growth, seasoning, breadth. */
@@ -569,7 +609,20 @@ export function fitSizeCurve(snapshot: Snapshot, model: ModelConstants = MODEL):
   const factors = [...categoryFactors(rows, intercept, slope, model).entries()]
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .map(([category, v]) => ({ category, factor: v.factor, live_count: v.live_count }));
-  return { intercept, slope, live_count: rows.length, factors, validation: leaveOneOut(snapshot, rows, model) };
+  // The residual bands: each category's middle half around the fitted
+  // curve, and the market-wide middle half for categories too thin to
+  // set their own. Same residuals the factors read, so the band and the
+  // point are one model, not two.
+  const { byCategory, global: globalResiduals } = residualLists(rows, intercept, slope, model);
+  const globalSorted = [...globalResiduals].sort((a, b) => a - b);
+  const globalBand = { p25: quantile(globalSorted, 0.25), p75: quantile(globalSorted, 0.75), live_count: globalResiduals.length };
+  const bands = [...byCategory.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([category, list]) => {
+      const s = [...list].sort((a, b) => a - b);
+      return { category, p25: quantile(s, 0.25), p75: quantile(s, 0.75), live_count: list.length };
+    });
+  return { intercept, slope, live_count: rows.length, factors, bands, globalBand, validation: leaveOneOut(snapshot, rows, model) };
 }
 
 /** The fitted curve's value for one TVL, before the category factor and the multipliers. */
@@ -583,6 +636,20 @@ function factorFor(category: string | null, curve: SizeCurve): { factor: number;
   const row = curve.factors.find((f) => f.category === category);
   if (row === undefined) return { factor: 1, liveCount: 0 };
   return { factor: row.factor, liveCount: row.live_count };
+}
+
+/** The residual band for a category: its own middle half when it has enough live comps, else the market-wide spread. Degenerate (no live comps anywhere) returns a zero-width band, so the caller still expands it to the point. */
+function bandFor(
+  category: string | null,
+  fit: SizeCurve,
+  minLive: number,
+): { p25: number; p75: number; usedGlobal: boolean } {
+  if (category !== null) {
+    const b = fit.bands.find((x) => x.category === category);
+    if (b !== undefined && b.live_count >= minLive) return { p25: b.p25, p75: b.p75, usedGlobal: false };
+  }
+  if (!Number.isFinite(fit.globalBand.p25) || !Number.isFinite(fit.globalBand.p75)) return { p25: 0, p75: 0, usedGlobal: true };
+  return { p25: fit.globalBand.p25, p75: fit.globalBand.p75, usedGlobal: true };
 }
 
 /** The multipliers and the implied value one protocol gets under the fitted curve and the comps table. */
@@ -873,21 +940,30 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
 }
 
 /** A board row's compact form for data.js, with the comp's provenance and the farm summary. */
-export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: number; comps: CategoryComp[] }): RadarRow {
+export function radarRow(
+  row: BoardRow,
+  watch: Set<string>,
+  comps: { global: number; comps: CategoryComp[] },
+  fit: SizeCurve,
+  model: ModelConstants = MODEL,
+): RadarRow {
   const table = new Map(comps.comps.map((c) => [c.category, c]));
   const compRow = row.category === null ? undefined : table.get(row.category);
-  // The range the row's implied value spans across its category's live
-  // comps: the same arithmetic at the lowest and highest member ratios.
-  // Only when the category median priced the row — a fallback row's single
-  // live comp is reference, not a range, so it shows the point alone.
-  let low: number | null = null;
-  let high: number | null = null;
-  if (compRow !== undefined && !compRow.used_global && compRow.members.length > 0) {
-    const ratios = compRow.members.map((m) => m.ratio);
-    const base = Math.max(1, row.tvl_usd) * row.model.growth_multiplier * row.model.maturity_multiplier * row.model.breadth_multiplier;
-    low = Math.max(1, Math.round(base * Math.min(...ratios)));
-    high = Math.max(1, Math.round(base * Math.max(...ratios)));
-  }
+  // The range the row spans: the middle half of its category's live
+  // comps around the fitted curve (25th–75th percentile of their
+  // residuals off the curve), so the band is the model's own
+  // uncertainty — the same curve and multipliers as the point, not a
+  // second model. Categories too thin to set their own band use the
+  // whole market's spread, so every row has a range. The band is then
+  // expanded to contain the point, so containment holds by
+  // construction: the point always sits inside its own range.
+  const band = bandFor(row.category, fit, model.comp_min_live);
+  const mults = row.model.growth_multiplier * row.model.maturity_multiplier * row.model.breadth_multiplier;
+  const base = Math.max(1, row.model.curve_usd);
+  let low = Math.max(1, Math.round(base * 10 ** band.p25 * mults));
+  let high = Math.max(1, Math.round(base * 10 ** band.p75 * mults));
+  low = Math.min(low, row.implied_value_usd);
+  high = Math.max(high, row.implied_value_usd);
   return {
     rank: row.rank,
     slug: row.slug,
@@ -902,6 +978,7 @@ export function radarRow(row: BoardRow, watch: Set<string>, comps: { global: num
     implied_value_usd: row.implied_value_usd,
     implied_low_usd: low,
     implied_high_usd: high,
+    band_used_global: band.usedGlobal,
     comp_multiple: row.model.comp_multiple,
     comp_live_count: compRow?.live_count ?? 0,
     comp_used_global: compRow?.used_global ?? true,
@@ -962,7 +1039,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     size_curve: { intercept: fit.intercept, slope: fit.slope, live_count: fit.live_count },
     validation: fit.validation,
     comps: compsWithFactors.comps,
-    rows: board.map((r) => radarRow(r, watch, compsWithFactors)),
+    rows: board.map((r) => radarRow(r, watch, compsWithFactors, fit, model)),
     live,
   };
   return { board, radar };
