@@ -50,6 +50,20 @@
 // [0.01, 5] before the fit, the same winsorisation the flat model used,
 // so a dead token at 0.00x or a 400x outlier cannot bend the slope.
 //
+// Slot #4 (lever (a)) audited this curve and kept it. The carried-over
+// multipliers were checked against the fitted residuals: growth, maturity
+// and breadth are all unpriced by the live-token market (residual
+// correlations -0.11, -0.04, -0.03 at n=128 — none significant), so the
+// curve does not double-count what they price, and no multiplier toggle
+// beats the curve on both LOO numbers. Two-piece hinges at nine
+// breakpoints, a quadratic, and per-category slopes (six settings) were
+// all tried on the same snapshot and all lose on LOO — except a hinge
+// above $1B TVL, nominally (x3.58, 43.8%), which fails honest validation:
+// its bootstrap intervals cover zero on both numbers, it wins on only
+// 76 of 128 tokens, and a split-half test never reproduces it. It is
+// selection noise from a nine-point grid, not a better curve, and was
+// not adopted. The line stays: intercept 2.3849, slope 0.6048.
+//
 // radar-4 adds what the detail view needs to defend the number: every
 // row carries the curve's value at its own TVL and the category factor
 // that adjusted it, and the range the row spans across the middle half
