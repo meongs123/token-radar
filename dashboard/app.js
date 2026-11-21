@@ -31,6 +31,28 @@
   // Implied value per dollar of TVL, computed live from the row: three
   // decimals below 0.1x so 0.065x reads as 0.065x, not 0.07x.
   function fmtRatio(n) { if (!isFinite(n)) return 'n/a'; return (n < 0.1 ? n.toFixed(3) : (Math.round(n * 100) / 100).toFixed(2)) + 'x'; }
+  // A row's implied range as one line, or its point alone when the
+  // category was too thin to set a range (fallback rows carry no
+  // low/high — the model prices them by the global median, so there is
+  // no range to show).
+  function hasRange(r) {
+    return r.implied_low_usd !== null && r.implied_low_usd !== undefined && r.implied_high_usd !== null && r.implied_high_usd !== undefined;
+  }
+  function fmtRange(r) {
+    if (!hasRange(r)) return fmtUsd(r.implied_value_usd);
+    return fmtUsd(r.implied_low_usd) + '–' + fmtUsd(r.implied_high_usd);
+  }
+  // The headline range, computed live from the rows: each row contributes
+  // its low–high range, or its point value when it has no range, so the
+  // total spans every row on the board.
+  function totalRange() {
+    var lo = 0, hi = 0;
+    DATA.rows.forEach(function (r) {
+      lo += hasRange(r) ? r.implied_low_usd : r.implied_value_usd;
+      hi += hasRange(r) ? r.implied_high_usd : r.implied_value_usd;
+    });
+    return { low: lo, high: hi };
+  }
   function round2(n) { return Math.round(n * 100) / 100; }
   function fmtMoney(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -276,16 +298,17 @@
 
   function lede() {
     var vc = DATA.verdict_counts || { farm: 0, thin: 0, skip: 0 };
+    var tr = totalRange();
     return el('section', { class: 'lede' },
       el('div', null,
-        el('h1', { text: DATA.board_size + ' protocols record no token — the market\u2019s own size curve prices them at ' + fmtUsd(DATA.total_implied_usd) }),
+        el('h1', { text: DATA.board_size + ' protocols record no token — the market\u2019s own size curve prices them at ' + fmtUsd(tr.low) + '–' + fmtUsd(tr.high) }),
         el('p', { html: 'Every protocol DefiLlama tracks with no token, priced off the ones that already trade — a size curve fitted on the live-token protocols in this snapshot prices each TVL, with a factor per category. It is a model, not a promise.' }),
         el('p', { class: 'verdict-line', html: '<b>$1,000</b> ticket: <b class="farm">FARM ' + vc.farm + '</b> pay after fees + 4% T-bill · <b class="thin">THIN ' + vc.thin + '</b> beat fees only · <b class="skipv">SKIP ' + vc.skip + '</b> fees eat the drop.' })
       ),
       el('div', { class: 'facts' },
         el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: DATA.watchlist_size + ' / ' + DATA.watchlist_size + ' · $' + Math.round(DATA.floor_usd / 1e6) + 'M+' })),
         el('div', { class: 'fact' }, el('span', { text: 'Pre-token rows scored' }), el('b', { text: String(DATA.board_size) })),
-        el('div', { class: 'fact' }, el('span', { text: 'Total implied value' }), el('b', { text: fmtUsd(DATA.total_implied_usd) })),
+        el('div', { class: 'fact' }, el('span', { text: 'Total implied value' }), el('b', { text: fmtUsd(tr.low) + '–' + fmtUsd(tr.high) }), el('span', { text: 'point ' + fmtUsd(DATA.total_implied_usd) })),
         el('div', { class: 'fact' }, el('span', { text: 'Live-token protocols set aside' }), el('b', { text: String(DATA.live_size) }))
       )
     );
@@ -320,7 +343,7 @@
           el('span', { class: 'rank', text: 'Rank ' + r.rank }),
           el('h3', { text: r.name }),
           el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') }),
-          el('div', { class: 'val', text: fmtUsd(r.implied_value_usd) + ' implied' }),
+          el('div', { class: 'val', text: fmtRange(r) + ' implied' }),
           el('span', { class: 'why', text: 'TVL ' + fmtUsd(r.tvl_usd) + ' curve ' + fmtUsd(r.curve_usd) + ' x ' + fmtMult(r.category_factor) + ', ' + fmtPct(r.change_7d) + ' in 7 days' })
         );
       })
@@ -443,7 +466,7 @@
         el('td', { class: 'num', title: 'Flat baseline ' + fmtMult(r.comp_multiple) + (r.comp_used_global ? ' (global median)' : ' (category median)') }, el('span', { text: fmtRatio(r.tvl_usd ? r.implied_value_usd / r.tvl_usd : 0) })),
         el('td', null, el('div', { class: 'implied' },
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' }), range),
-          el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
+          el('span', { class: 'num rng-val', title: hasRange(r) ? 'Point ' + fmtUsd(r.implied_value_usd) : 'Point value — no range: category too thin', text: fmtRange(r) })
         )),
         el('td', { class: 'num', text: fmtMoney(t.slice_usd) }),
         el('td', { class: 'num ' + (t.net_per_hour_usd >= 0 ? 'pos' : 'neg'), text: netText }),
@@ -464,7 +487,7 @@
             sortHeader('growth', '7d'),
             sortHeader('age', 'Age'),
             el('th', { scope: 'col', text: 'Mult' }),
-            sortHeader('implied', 'Implied value'),
+            sortHeader('implied', 'Implied range'),
             sortHeader('slice', '$1K slice'),
             sortHeader('net', 'Net $/h'),
             el('th', { scope: 'col', text: 'Verdict' }),
@@ -582,7 +605,10 @@
         el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: fmtMult(row.maturity_multiplier) })),
         el('div', null, el('span', { text: 'Breadth multiplier' }), el('b', { class: 'num', text: fmtMult(row.breadth_multiplier) })),
-        el('div', { class: 'total' }, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }))
+        el('div', { class: 'total' }, el('span', { text: 'Implied value' }), el('div', null,
+          el('b', { class: 'num', text: fmtRange(row) }),
+          hasRange(row) ? el('span', { class: 'pt-sub', text: 'point ' + fmtUsd(row.implied_value_usd) }) : null
+        ))
       ),
       el('p', { class: 'sub', text: 'Seven-day growth ' + fmtPct(row.change_7d) + '; age with no token ' + fmtAge(row.age_days) + '.' + rangeText }),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
