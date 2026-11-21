@@ -66,7 +66,8 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .name b{font-size:13px;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .name .sub{color:var(--muted);font-size:12px;max-width:100px;overflow:hidden;text-overflow:ellipsis}
 .global{font-size:11px;color:var(--faint)}
-.implied{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:130px}
+.implied{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:150px}
+.rng-val{white-space:nowrap}
 .bar{position:relative;flex:1;height:8px;background:#1c2f47;border-radius:99px;overflow:hidden}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--blue))}
 .bar .rng{position:absolute;top:3px;height:2px;background:var(--ink);opacity:.55;border-radius:2px}
@@ -112,6 +113,7 @@ dialog.detail::backdrop{background:rgba(2,6,16,.72)}
 .equation>div{display:flex;justify-content:space-between;gap:12px}
 .equation .num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .equation>.total{grid-column:1/-1;border-top:1px solid var(--line);padding-top:2px}
+.equation .total .pt-sub{color:var(--muted);font-size:12.5px;margin-left:6px}
 .members{margin:4px 0;padding-left:20px}
 .equation-line{font-size:13.5px;line-height:1.6;margin:0}
 .equation-line b{color:var(--ink)}
