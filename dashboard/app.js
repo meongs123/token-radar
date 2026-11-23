@@ -133,7 +133,9 @@
   // yield in DATA.farm — an assumption the page labels as one. FARM
   // clears gas and the T-bill, THIN clears gas alone, SKIP does not
   // cover its fees. The plan's own deposit is max(TVL tier, pays_from)
-  // rounded up to the next $25 when pays_from is at most $1,000.
+  // rounded up to the next $25 when pays_from is at most $1,000, then lifted by $25 steps while
+  // its unrounded net is below $0.10 (capped at $1,000) — the same rule lib/model.ts applies,
+  // so the page's recomputation and the board agree.
   function paysExactOf(row) {
     var f = DATA.farm;
     var txGas = gasTxUsd(firstChainOf(row));
@@ -147,7 +149,19 @@
     var tier = tierCapitalFor(row);
     var pays = paysExactOf(row);
     if (pays === null || pays > DATA.farm.ticket_usd) return tier;
-    return Math.max(tier, Math.ceil(pays / 25) * 25);
+    var deposit = Math.max(tier, Math.ceil(pays / 25) * 25);
+    // Lift the deposit by $25 steps while its UNROUNDED net (deposit * rate - gas) is below $0.10,
+    // capped at the $1,000 yardstick — mirrors planCapitalFor in lib/model.ts.
+    var f = DATA.farm;
+    var txGas = gasTxUsd(firstChainOf(row));
+    var hold = holdDaysFor(row.age_days);
+    var weeks = Math.floor(hold / 7);
+    var gas = (f.gas_funding_txs + f.gas_deposit_claim_txs + f.gas_weekly_txs * weeks) * txGas;
+    var rate = f.share * (row.implied_value_usd / Math.max(1, row.tvl_usd)) - f.tbill_rate * (hold / 365);
+    if (rate > 0) {
+      while (deposit < f.ticket_usd && deposit * rate - gas < 0.10) deposit += 25;
+    }
+    return deposit;
   }
   function ticketOf(row) {
     var f = DATA.farm;
@@ -246,9 +260,9 @@
     if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0) return 'Supply $' + capital + ' of USDC to ' + name + ' on ' + chain + ' and borrow a small amount against it, then repay the borrow.';
     if (c.indexOf('dex') >= 0 || c.indexOf('leveraged farm') >= 0) return 'Provide $' + capital + ' of liquidity to ' + name + "'s main pool on " + chain + ' and keep the position open.';
     if (c.indexOf('bridge') >= 0 || c.indexOf('cross chain') >= 0) return 'Bridge $' + capital + ' of USDC to ' + chain + ' through ' + name + ' and use the bridged funds in its app.';
-    if (c.indexOf('restak') >= 0 || c.indexOf('liquid staking') >= 0) return 'Stake $' + capital + " of the chain's staking asset through " + name + ' and keep the receipt token.';
+    if (c.indexOf('restak') >= 0 || c.indexOf('liquid staking') >= 0) return 'Stake $' + capital + ' of ' + chain + "'s staking asset through " + name + ' and keep the receipt token.';
     if (c.indexOf('staking pool') >= 0 || c.indexOf('staking') >= 0) return 'Stake $' + capital + ' through ' + name + ' on ' + chain + ' and keep the position open.';
-    if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0 || c.indexOf('basis trad') >= 0) return 'Deposit $' + capital + ' of USDC as margin on ' + name + ' and open one small hedged trade.';
+    if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0 || c.indexOf('basis trad') >= 0) return 'Deposit $' + capital + ' of USDC as margin on ' + name + ' on ' + chain + ' and open one small hedged trade.';
     if (c.indexOf('prediction') >= 0) return 'Fund $' + capital + ' and place one market position on ' + name + '.';
     if (c.indexOf('curator') >= 0 || c.indexOf('allocator') >= 0 || c.indexOf('capital') >= 0) return 'Deposit $' + capital + ' into a ' + name + ' vault on ' + chain + ' and keep the vault shares.';
     if (c.indexOf('stable') >= 0) return 'Mint or deposit $' + capital + ' of the stable asset through ' + name + ' on ' + chain + ' and hold it.';
@@ -257,7 +271,7 @@
     if (c.indexOf('yield aggregator') >= 0 || c.indexOf('yield') >= 0) return 'Deposit $' + capital + ' into ' + name + "'s highest-TVL vault on " + chain + ' and keep the shares.';
     if (c.indexOf('payment') >= 0) return 'Send $' + capital + ' through ' + name + ' on ' + chain + ' and keep the receipt.';
     if (c.indexOf('governance') >= 0) return 'Deposit $' + capital + ' into ' + name + ' on ' + chain + ' and vote in its next governance round.';
-    if (c.indexOf('chain') >= 0) return 'Bridge $' + capital + ' onto ' + name + "'s chain and use its main app once a week.";
+    if (c.indexOf('chain') >= 0) return 'Bridge $' + capital + ' onto ' + chain + ' through ' + name + ' and use its main app once a week.';
     if (c.indexOf('index') >= 0) return 'Buy $' + capital + ' of the ' + name + ' index on ' + chain + ' and hold it.';
     if (c.indexOf('privacy') >= 0) return 'Use $' + capital + ' through ' + name + "'s private pool on " + chain + ' and keep the receipt.';
     if (c.indexOf('cedefi') >= 0) return 'Deposit $' + capital + ' into ' + name + ' on ' + chain + ' and keep the position open.';

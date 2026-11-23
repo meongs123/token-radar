@@ -848,7 +848,10 @@ export const FARM: FarmAssumptions = {
  * as max(TVL tier, pays_from) rounded up to the next $25 when
  * pays_from exists and is at most $1,000 — so a FARM row's own deposit
  * pays, by construction (deposit >= gas/rate, using the unrounded
- * pays_from, so rounding cannot push its net below zero).
+ * pays_from, so rounding cannot push its net below zero) — then lifted
+ * by $25 steps while its unrounded net is below $0.10 (capped at
+ * $1,000), so a FARM row's own deposit nets at least $0.10 in the
+ * modal instead of a rounded $0.00.
  */
 export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, implied: number): TicketEconomics {
   const chain = firstChainOf(protocol);
@@ -867,7 +870,7 @@ export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, 
   const netPerHour = net / (minutes / 60);
   const rate = TICKET_SHARE * (implied / tvl) - TBILL_RATE * (hold / 365);
   const paysExact = rate > 0 ? gas / rate : null;
-  const deposit = planCapitalFor(protocol, paysExact);
+  const deposit = planCapitalFor(protocol, paysExact, rate, gas);
   const depositSlice = (deposit * TICKET_SHARE * implied) / tvl;
   const depositForgone = deposit * TBILL_RATE * (hold / 365);
   const depositNet = depositSlice - gas - depositForgone;
@@ -968,12 +971,21 @@ function tierCapitalFor(p: SnapshotProtocol): number {
  * deposit's net below zero) exists and is at most the $1,000
  * yardstick; otherwise the TVL tier — the verdict already says do not
  * farm those rows. `paysExact` is null when the T-bill beats the plan
- * at any size.
+ * at any size. After sizing, the deposit is lifted by $25 steps while
+ * its UNROUNDED net (deposit * rate - gas) is below $0.10, capped at
+ * $1,000, so a FARM row's own deposit never displays a rounded $0.00
+ * net in the modal. `rate` and `gasUsd` are the ticket's own rate and
+ * gas, passed by the callers that already hold them; without them the
+ * lift cannot be computed and the sized deposit stands.
  */
-export function planCapitalFor(p: SnapshotProtocol, paysExact: number | null): number {
+export function planCapitalFor(p: SnapshotProtocol, paysExact: number | null, rate: number | null = null, gasUsd = 0): number {
   const tier = tierCapitalFor(p);
   if (paysExact === null || paysExact > TICKET_USD) return tier;
-  return Math.max(tier, roundUp25(paysExact));
+  let deposit = Math.max(tier, roundUp25(paysExact));
+  if (rate !== null && rate > 0) {
+    while (deposit < TICKET_USD && deposit * rate - gasUsd < 0.10) deposit += 25;
+  }
+  return deposit;
 }
 
 /** The plan's deposit for a protocol, from its own record and implied value: the ticket's pays_from, recomputed here so the steps and the summary need no ticket. */
@@ -984,7 +996,7 @@ export function planCapital(p: SnapshotProtocol, age: number | null, implied: nu
   const weeks = Math.floor(hold / 7);
   const gas = (GAS_FUNDING_TXS + GAS_DEPOSIT_CLAIM_TXS + GAS_WEEKLY_TXS * weeks) * txGas;
   const rate = TICKET_SHARE * (implied / Math.max(1, p.tvl_usd)) - TBILL_RATE * (hold / 365);
-  return planCapitalFor(p, rate > 0 ? gas / rate : null);
+  return planCapitalFor(p, rate > 0 ? gas / rate : null, rate, gas);
 }
 
 /** Gas for one transaction on the protocol's deposit chain, in the words a farmer budgets with: the ASSUMED range whose midpoint gasTxUsd returns. */
@@ -1019,9 +1031,9 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return `Supply $${capital} of USDC to ${name} on ${chain} and borrow a small amount against it, then repay the borrow.`;
   if (c.includes('dex') || c.includes('leveraged farm')) return `Provide $${capital} of liquidity to ${name}'s main pool on ${chain} and keep the position open.`;
   if (c.includes('bridge') || c.includes('cross chain')) return `Bridge $${capital} of USDC to ${chain} through ${name} and use the bridged funds in its app.`;
-  if (c.includes('restak') || c.includes('liquid staking')) return `Stake $${capital} of the chain's staking asset through ${name} and keep the receipt token.`;
+  if (c.includes('restak') || c.includes('liquid staking')) return `Stake $${capital} of ${chain}'s staking asset through ${name} and keep the receipt token.`;
   if (c.includes('staking pool') || c.includes('staking')) return `Stake $${capital} through ${name} on ${chain} and keep the position open.`;
-  if (c.includes('perpetual') || c.includes('derivative') || c.includes('basis trad')) return `Deposit $${capital} of USDC as margin on ${name} and open one small hedged trade.`;
+  if (c.includes('perpetual') || c.includes('derivative') || c.includes('basis trad')) return `Deposit $${capital} of USDC as margin on ${name} on ${chain} and open one small hedged trade.`;
   if (c.includes('prediction')) return `Fund $${capital} and place one market position on ${name}.`;
   if (c.includes('curator') || c.includes('allocator') || c.includes('capital')) return `Deposit $${capital} into a ${name} vault on ${chain} and keep the vault shares.`;
   if (c.includes('stable')) return `Mint or deposit $${capital} of the stable asset through ${name} on ${chain} and hold it.`;
@@ -1030,7 +1042,7 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   if (c.includes('yield aggregator') || c.includes('yield')) return `Deposit $${capital} into ${name}'s highest-TVL vault on ${chain} and keep the shares.`;
   if (c.includes('payment')) return `Send $${capital} through ${name} on ${chain} and keep the receipt.`;
   if (c.includes('governance')) return `Deposit $${capital} into ${name} on ${chain} and vote in its next governance round.`;
-  if (c.includes('chain')) return `Bridge $${capital} onto ${name}'s chain and use its main app once a week.`;
+  if (c.includes('chain')) return `Bridge $${capital} onto ${chain} through ${name} and use its main app once a week.`;
   if (c.includes('index')) return `Buy $${capital} of the ${name} index on ${chain} and hold it.`;
   if (c.includes('privacy')) return `Use $${capital} through ${name}'s private pool on ${chain} and keep the receipt.`;
   if (c.includes('cedefi')) return `Deposit $${capital} into ${name} on ${chain} and keep the position open.`;
