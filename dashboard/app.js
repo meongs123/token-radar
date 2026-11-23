@@ -31,9 +31,6 @@
   }
   function fmtDollars(n) { if (n === null || n === undefined || !isFinite(n)) return 'n/a'; return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
-  // The model in one function, first in this file so the dossier text
-  // never cuts it: the page recomputes a row and checks the number
-  // board.json carries.
   function curveFactorOf(category) {
     if (!category) return 1;
     for (var i = 0; i < (DATA.comps || []).length; i++) if (DATA.comps[i].category === category) return DATA.comps[i].curve_factor === undefined || DATA.comps[i].curve_factor === null ? 1 : DATA.comps[i].curve_factor;
@@ -65,7 +62,6 @@
     var tier = tierCapitalFor(row), pays = paysExactOf(row);
     if (pays === null || pays > DATA.farm.ticket_usd) return tier;
     var deposit = Math.max(tier, Math.ceil(pays / 25) * 25), gr = gasRateOf(row);
-    // Lift by $25 steps while unrounded net is below $0.10 — mirrors planCapitalFor in lib/model.ts.
     if (gr.rate > 0) { while (deposit < DATA.farm.ticket_usd && deposit * gr.rate - gr.gas < 0.10) deposit += 25; }
     return deposit;
   }
@@ -191,7 +187,6 @@
     else window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
-  // First two chains, or the fallback when a protocol lists none.
   function chainLabel(r) { return (r.chains && r.chains.length) ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain'; }
 
   function rows() {
@@ -408,7 +403,6 @@
     var X = function (v) { return (8 + (v - x0) / dx * (W - 16)).toFixed(1); };
     var Y = function (v) { return (H - 6 - (v - y0) / dy * (H - 12)).toFixed(1); };
     var sres = res.slice().sort(function (a, b) { return a - b; });
-    // The table prints the widened band, so the scatter draws it too.
     var widen = DATA.band_honesty ? DATA.band_honesty.widen : 1;
     var raw25 = quantile(sres, 0.25), raw75 = quantile(sres, 0.75);
     var mid = (raw25 + raw75) / 2, half = (raw75 - raw25) / 2 * widen;
@@ -525,9 +519,9 @@
     (DATA.term_table || []).forEach(function (t) {
       tbody.appendChild(el('tr', null,
         el('td', null, el('b', { text: t.term })),
-        el('td', { class: 'num', text: 'x' + t.loo.median_miss.toFixed(2) + ' · ' + Math.round(t.loo.within_3x * 1000) / 10 + '%' }),
-        el('td', { class: 'num', text: 'x' + t.wf_half.median_miss.toFixed(2) + ' · ' + Math.round(t.wf_half.within_3x * 1000) / 10 + '%' }),
-        el('td', { class: 'num', text: 'x' + t.wf_900.median_miss.toFixed(2) + ' · ' + Math.round(t.wf_900.within_3x * 1000) / 10 + '%' }), el('td', { text: t.note })));
+        el('td', { class: 'num', text: fmtTest(t.loo) }),
+        el('td', { class: 'num', text: fmtTest(t.wf_half) }),
+        el('td', { class: 'num', text: fmtTest(t.wf_900) }), el('td', { text: t.note })));
     });
     return el('section', { class: 'panel' },
       el('h2', { text: 'What was tried, and what won' }),
@@ -635,11 +629,26 @@
     if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); } else dialog.setAttribute('open', '');
   }
 
+  function fmtTest(s) { return 'x' + s.median_miss.toFixed(2) + ' · ' + Math.round(s.within_3x * 1000) / 10 + '%'; }
+
+  function decisiveTable() {
+    var tb = el('tbody');
+    (DATA.term_table || []).forEach(function (t) {
+      if (['Size curve', '+ category factor', '+ growth, maturity, breadth'].indexOf(t.term) < 0) return;
+      tb.appendChild(el('tr', null,
+        el('td', null, el('b', { text: t.term })),
+        el('td', { class: 'num', text: 'LOO ' + fmtTest(t.loo) + ' · WF-half ' + fmtTest(t.wf_half) + ' · WF-900 ' + fmtTest(t.wf_900) })));
+    });
+    return el('div', { class: 'table-wrap' }, el('table', { class: 'mini' },
+      el('caption', { text: 'Decisive comparison — outer band: ' + Math.round(DATA.band_honesty.outer_measured * 1000) / 10 + '% inside P10–P90.' }),
+      tb));
+  }
+
   function render() {
     app.textContent = '';
     document.title = 'Token Radar — ' + titleText();
     var shell = el('div', { class: 'shell' });
-    shell.appendChild(header()); shell.appendChild(lede()); shell.appendChild(integrityStrip()); shell.appendChild(formulaBar());
+    shell.appendChild(header()); shell.appendChild(lede()); shell.appendChild(integrityStrip()); shell.appendChild(formulaBar()); shell.appendChild(decisiveTable());
     if (state.tab === 'pre-token') shell.appendChild(spotlight());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
