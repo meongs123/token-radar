@@ -295,7 +295,7 @@
     var setTotal = setAsideTotal(led), accounted = (led.ranked || 0) + (led.live_token || 0) + setTotal;
     var totals = sum === DATA.total_implied_usd ? 'totals equal: ' + fmtUsd(sum) : 'totals MISMATCH: rows sum ' + fmtUsd(sum) + ' vs ' + fmtUsd(DATA.total_implied_usd);
     var text = 'this table = board.json: ' + ok + '/' + n + ' rows recomputed · ranks 1–' + n + (ordered ? ' in order, values never rise' : ' — ORDER BREAKS') + ' · ' + totals
-      + (DATA.board_checksum ? ' · checksum ' + DATA.board_checksum.slice(0, 12) + '… = main.ts' : '')
+      + (DATA.board_checksum ? ' · checksum ' + DATA.board_checksum.slice(0, 12) + '… = board.json' : '')
       + ' · watchlist ' + watch + '/' + DATA.watchlist_size + ' · ledger ' + accounted + '/' + led.total;
     return el('section', { class: 'formula-bar', 'aria-label': 'Integrity strip' },
       el('p', { text: text })
