@@ -81,24 +81,30 @@
 // whole plan before reading its seven steps.
 //
 // Slot #5 (lever (b)) prices the farm ticket per protocol, not per
-// board: gas is priced on the cheapest chain the protocol itself
-// lists in the snapshot (its `chains`), the deposit is the plan's
-// own capital for that protocol (its TVL tier), and the T-bill the
-// ticket gives up stays an explicitly labelled assumption — the
-// snapshot carries no fee, yield or deposit field (ten fields only:
-// slug, name, category, chains, tvl_usd, change_7d, mcap_usd,
-// listed_at, gecko_id, symbol), so no dollar gas figure and no
-// yield can be read off it; the per-chain gas figures below are
-// the midpoints of the ranges the farm plan states in words, and
-// the code and the page both say so. The standard ticket stays the
-// board's yardstick (the verdict is struck at TICKET_USD, as the
+// board: gas is priced on the FIRST chain the protocol itself lists
+// in the snapshot (its `chains`[0]) — the snapshot's `chains` records
+// only where a protocol has TVL, never whether its farmable product
+// (vault, mint, lending market) exists on a chain, so pricing on a
+// later-listed cheaper chain would assert a deposit the data cannot
+// support; the first-listed chain is the defensible one, and the plan
+// deposits there. The T-bill the ticket gives up stays an explicitly
+// labelled assumption — the snapshot carries no fee, yield or deposit
+// field (ten fields only: slug, name, category, chains, tvl_usd,
+// change_7d, mcap_usd, listed_at, gecko_id, symbol), so no dollar gas
+// figure and no yield can be read off it; the per-chain gas figures
+// below are the midpoints of the ASSUMED ranges the farm plan states
+// in words, and the code and the page both say so. Funding gas (one
+// transaction) and weekly gas (two transactions a week) are derived
+// from the same chain rate, so one scale prices the whole ticket:
+// gas = funding + deposit/claim (2 tx) + weekly x weeks, and the
+// steps state the same dollars the ticket totals. The plan's own
+// deposit is sized so the plan itself pays: max(TVL tier, pays_from),
+// pays_from rounded up to the next $25, whenever pays_from exists
+// and is at most the $1,000 yardstick — otherwise the TVL tier stands
+// and the verdict already says do not farm. The standard ticket stays
+// the board's yardstick (the verdict is struck at TICKET_USD, as the
 // rubric asks); the plan's own deposit is priced beside it in the
-// detail view, and shown on every board row. Pricing the verdict at
-// the plan deposit instead would leave no FARM row at all (the
-// largest slice at the smallest plan deposit is under four dollars
-// against at least eleven dollars of gas) — the yardstick is what
-// keeps the verdict a comparison, and the deposit line is what keeps
-// it honest.
+// detail view, and shown on every board row.
 //
 // No protocol name is ever special-cased: the same function scores every
 // row, and the dashboard shows each row's inputs so any reader can redo
@@ -702,19 +708,27 @@ export const TICKET_SHARE = 0.1;
  * assumption rather than replaced by an invented one.
  */
 export const TBILL_RATE = 0.04;
-/** The plan's own stated cost to fund the farming wallet, in dollars. */
-export const GAS_FUNDING_USD = 3;
-/** The plan's own stated gas per week over the hold, in dollars. */
-export const GAS_WEEKLY_USD = 2;
+/** Transactions to fund the farming wallet: one, priced at the chain rate (F4) — never a flat $3, which contradicts a $9 Ethereum transaction and a $0.05 Solana one in the same modal. */
+export const GAS_FUNDING_TXS = 1;
+/** Transactions a week over the hold: two, priced at the chain rate (F3) — the weekly line, the per-tx chip and the ticket total use one scale. */
+export const GAS_WEEKLY_TXS = 2;
+/** Transactions to deposit and to claim: one each. */
+export const GAS_DEPOSIT_CLAIM_TXS = 2;
 
 /** What the standard farm ticket in one protocol is worth, in dollars — plus what the plan's own deposit is worth, priced the same way. */
 export interface TicketEconomics {
   ticket_usd: number;
-  /** The ticket's pro-rata share of the implied value, if 10% of the launch goes to depositors. */
+  /** The ticket's pro-rata share of the implied value, if an assumed 10% of the launch goes to depositors. */
   slice_usd: number;
-  /** The plan's own stated gas: $3 to fund the wallet, one transaction's gas to deposit and one to claim, $2 a week over the hold. */
+  /** The ticket's gas, all at the chain rate: funding (1 tx) + deposit/claim (2 tx) + weekly (2 tx/week x weeks). */
   gas_usd: number;
-  /** The chain the gas was priced on: the cheapest chain the protocol lists in the snapshot. */
+  /** Funding gas: one transaction at the chain rate. */
+  gas_funding_usd: number;
+  /** Weekly gas: two transactions a week at the chain rate. */
+  gas_weekly_usd: number;
+  /** Deposit + claim gas: two transactions at the chain rate. */
+  gas_deposit_claim_usd: number;
+  /** The chain the gas was priced on: the first chain the protocol lists in the snapshot. */
   gas_chain: string;
   /** One transaction's gas on that chain, in dollars. */
   gas_tx_usd: number;
@@ -729,7 +743,7 @@ export interface TicketEconomics {
   /** The ticket at which the plan breaks even, or null when the T-bill beats it at any size. */
   pays_from_usd: number | null;
   hold_days: number;
-  /** The plan's own deposit for this protocol, from its TVL tier — the size the farm plan actually deposits, not the yardstick. */
+  /** The plan's own deposit for this protocol — max(TVL tier, pays_from) rounded up to the next $25 when pays_from exists and is at most $1,000, else the TVL tier — the size the farm plan actually deposits, not the yardstick. */
   deposit_usd: number;
   /** That deposit's pro-rata share of the implied value. */
   deposit_slice_usd: number;
@@ -743,82 +757,108 @@ export interface TicketEconomics {
 
 /**
  * Gas for one transaction on a chain, in dollars: the midpoints of the
- * ranges gasFor states in words. SOURCE: the snapshot carries no fee
- * field — its ten fields are slug, name, category, chains, tvl_usd,
- * change_7d, mcap_usd, listed_at, gecko_id, symbol — so no per-chain
- * gas figure can be read off it, and none here is: each figure is the
- * midpoint of the range the farm plan already states in words for that
- * chain family, a labelled assumption, not snapshot data. The ranges
- * are the ones gasFor states in words for each family. What IS snapshot data is which chain a row is priced
- * on: cheapestChainOf takes the cheapest of the protocol's own `chains`.
+ * ASSUMED ranges gasFor states in words. SOURCE: the snapshot carries
+ * no fee field — its ten fields are slug, name, category, chains,
+ * tvl_usd, change_7d, mcap_usd, listed_at, gecko_id, symbol — so no
+ * per-chain gas figure can be read off it, and none here is: each
+ * figure is the midpoint of the range the farm plan already states in
+ * words for that chain family, a labelled assumption, not snapshot
+ * data. The ranges are the ones gasFor states in words for each
+ * family — Ethereum $6–$12, Solana $0–$0.10, Bitcoin $2–$5, Base
+ * $0.01–$0.09, Arbitrum/Optimism/zkSync $0.05–$0.25, Polygon
+ * $0.01–$0.05, Binance $0.05–$0.15, Avalanche $0.10–$0.50, Monad
+ * $0.01–$0.09, every other chain $1–$3. What IS snapshot data is
+ * which chain a row is priced on: firstChainOf takes the first of the
+ * protocol's own `chains`.
  */
 export function gasTxUsd(chain: string): number {
   const c = chain.toLowerCase();
   if (c.includes('ethereum')) return 9;
   if (c.includes('solana')) return 0.05;
   if (c.includes('bitcoin')) return 3.5;
+  if (c.includes('base')) return 0.05;
+  if (c.includes('arbitrum')) return 0.15;
+  if (c.includes('optimism')) return 0.15;
+  if (c.includes('polygon')) return 0.03;
+  if (c.includes('zksync')) return 0.15;
+  if (c.includes('binance')) return 0.1;
+  if (c.includes('avalanche')) return 0.3;
+  if (c.includes('monad')) return 0.05;
   return 2;
 }
 
-/** The cheapest chain a protocol lists, by gasTxUsd — ties keep the first listed, so the choice is deterministic. Empty when the protocol lists no chain. */
-export function cheapestChainOf(p: SnapshotProtocol): string {
-  let best = '';
-  let bestGas = Number.POSITIVE_INFINITY;
-  for (const chain of p.chains) {
-    const g = gasTxUsd(chain);
-    if (g < bestGas) {
-      bestGas = g;
-      best = chain;
-    }
-  }
-  return best;
+/** The first chain a protocol lists in the snapshot. Empty when the protocol lists no chain. */
+export function firstChainOf(p: SnapshotProtocol): string {
+  return p.chains.length > 0 ? p.chains[0]! : '';
+}
+
+/** Round a dollar amount up to the next $25 — the plan capital's round number. */
+export function roundUp25(n: number): number {
+  return Math.ceil(n / 25) * 25;
+}
+
+/** One transaction's gas in dollars, formatted the way the steps state it: $9, $3.50, $0.05. */
+export function fmtGasUsd(n: number): string {
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
 }
 
 /** The farm ticket's own stated assumptions, carried in data.js so the page recomputes the ticket from the same numbers instead of its own literals. */
 export interface FarmAssumptions {
   ticket_usd: number;
+  /** Assumed share of a launch that goes to depositors; the page must label it an assumption. */
   share: number;
+  share_assumption: boolean;
   /** Assumed T-bill yield; true means the page must label it an assumption. */
   tbill_rate: number;
   tbill_assumption: boolean;
-  gas_funding_usd: number;
-  gas_weekly_usd: number;
-  /** One transaction's gas in dollars, by chain family: the midpoints gasTxUsd returns. */
-  gas_tx: { ethereum: number; solana: number; bitcoin: number; other: number };
+  /** Transactions to fund the wallet (1), a week over the hold (2), and to deposit + claim (2) — each priced at the chain rate, never a flat dollar figure. */
+  gas_funding_txs: number;
+  gas_weekly_txs: number;
+  gas_deposit_claim_txs: number;
+  /** One transaction's gas in dollars, by chain family: the midpoints gasTxUsd returns — assumed range midpoints, not measured fees. */
+  gas_tx: { ethereum: number; solana: number; bitcoin: number; base: number; arbitrum: number; optimism: number; polygon: number; zksync: number; binance: number; avalanche: number; monad: number; other: number };
 }
 
 export const FARM: FarmAssumptions = {
   ticket_usd: TICKET_USD,
   share: TICKET_SHARE,
+  share_assumption: true,
   tbill_rate: TBILL_RATE,
   tbill_assumption: true,
-  gas_funding_usd: GAS_FUNDING_USD,
-  gas_weekly_usd: GAS_WEEKLY_USD,
-  gas_tx: { ethereum: 9, solana: 0.05, bitcoin: 3.5, other: 2 },
+  gas_funding_txs: GAS_FUNDING_TXS,
+  gas_weekly_txs: GAS_WEEKLY_TXS,
+  gas_deposit_claim_txs: GAS_DEPOSIT_CLAIM_TXS,
+  gas_tx: { ethereum: 9, solana: 0.05, bitcoin: 3.5, base: 0.05, arbitrum: 0.15, optimism: 0.15, polygon: 0.03, zksync: 0.15, binance: 0.1, avalanche: 0.3, monad: 0.05, other: 2 },
 };
 
 /**
  * The standard farm ticket, priced from the farm plan's own stated costs and
- * the row's own implied value — no new pricing inputs, only two stated
- * assumptions the board prints next to the numbers: 10% of the launch
- * goes to depositors pro rata, and the ticket gives up an assumed 4%
- * T-bill yield while it sits in the position. Gas is priced on the
- * cheapest chain the protocol lists in the snapshot, so a protocol on
- * Ethereum and Base pays Base gas, not Ethereum gas; the verdict is the
- * ticket's own arithmetic: FARM when the slice clears gas and the
- * T-bill, THIN when it clears gas alone, SKIP when it does not cover
- * its fees. The plan's own deposit is priced beside the yardstick with
- * the same gas and the same assumed T-bill, so the reader sees what the
- * deposit the plan actually makes earns — the verdict stays struck at
- * the yardstick, because at the plan's own deposit no row's slice covers
- * its gas at all.
+ * the row's own implied value — no new pricing inputs, only stated
+ * assumptions the board prints next to the numbers: an assumed 10% of
+ * the launch goes to depositors pro rata, and the ticket gives up an
+ * assumed 4% T-bill yield while it sits in the position. Gas is priced
+ * on the FIRST chain the protocol lists in the snapshot, at that
+ * chain's assumed per-transaction rate: funding is one transaction,
+ * deposit + claim two, weekly two a week, so gas = tx * (3 + 2*weeks)
+ * on one scale and the steps state the same dollars the ticket totals.
+ * The verdict is the ticket's own arithmetic: FARM when the slice
+ * clears gas and the T-bill, THIN when it clears gas alone, SKIP when
+ * it does not cover its fees. The plan's own deposit is priced beside
+ * the yardstick with the same gas and the same assumed T-bill, sized
+ * as max(TVL tier, pays_from) rounded up to the next $25 when
+ * pays_from exists and is at most $1,000 — so a FARM row's own deposit
+ * pays, by construction (deposit >= gas/rate, using the unrounded
+ * pays_from, so rounding cannot push its net below zero).
  */
 export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, implied: number): TicketEconomics {
-  const chain = cheapestChainOf(protocol);
+  const chain = firstChainOf(protocol);
   const txGas = gasTxUsd(chain);
   const hold = holdDaysFor(age);
   const weeks = Math.floor(hold / 7);
-  const gas = GAS_FUNDING_USD + 2 * txGas + GAS_WEEKLY_USD * weeks;
+  const fundingUsd = GAS_FUNDING_TXS * txGas;
+  const depositClaimUsd = GAS_DEPOSIT_CLAIM_TXS * txGas;
+  const weeklyUsd = GAS_WEEKLY_TXS * txGas;
+  const gas = fundingUsd + depositClaimUsd + weeklyUsd * weeks;
   const forgone = TICKET_USD * TBILL_RATE * (hold / 365);
   const tvl = Math.max(1, protocol.tvl_usd);
   const slice = (TICKET_USD * TICKET_SHARE * implied) / tvl;
@@ -826,7 +866,8 @@ export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, 
   const minutes = 35 + 10 * weeks + 10 + 10;
   const netPerHour = net / (minutes / 60);
   const rate = TICKET_SHARE * (implied / tvl) - TBILL_RATE * (hold / 365);
-  const deposit = capitalFor(protocol);
+  const paysExact = rate > 0 ? gas / rate : null;
+  const deposit = planCapitalFor(protocol, paysExact);
   const depositSlice = (deposit * TICKET_SHARE * implied) / tvl;
   const depositForgone = deposit * TBILL_RATE * (hold / 365);
   const depositNet = depositSlice - gas - depositForgone;
@@ -834,13 +875,16 @@ export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, 
     ticket_usd: TICKET_USD,
     slice_usd: round2(slice),
     gas_usd: round2(gas),
+    gas_funding_usd: round2(fundingUsd),
+    gas_weekly_usd: round2(weeklyUsd),
+    gas_deposit_claim_usd: round2(depositClaimUsd),
     gas_chain: chain,
     gas_tx_usd: round2(txGas),
     forgone_usd: round2(forgone),
     net_usd: round2(net),
     net_per_hour_usd: round2(netPerHour),
     verdict: net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP',
-    pays_from_usd: rate > 0 ? Math.round(gas / rate) : null,
+    pays_from_usd: paysExact === null ? null : Math.round(paysExact),
     hold_days: hold,
     deposit_usd: deposit,
     deposit_slice_usd: round2(depositSlice),
@@ -890,7 +934,7 @@ export function buildBoard(
       age_days: s.v.age,
     },
     ticket: ticketEconomics(s.p, s.v.age, s.v.implied),
-    farm_steps: farmSteps(s.p, s.v.age).map(stepText),
+    farm_steps: farmSteps(s.p, s.v.age, s.v.implied).map(stepText),
   }));
 }
 
@@ -904,26 +948,59 @@ export function stepText(step: FarmStep): string {
   return s;
 }
 
-/** The chain the plan deposits on: the cheapest chain the protocol lists in the snapshot, so the plan's gas and its words agree. A protocol with no chain gets a neutral phrase. */
+/** The chain the plan deposits on: the first chain the protocol lists in the snapshot, so the plan's gas and its words agree. A protocol with no chain gets a neutral phrase. */
 function chainOf(p: SnapshotProtocol): string {
-  const cheapest = cheapestChainOf(p);
-  return cheapest === '' ? 'its main chain' : cheapest;
+  const first = firstChainOf(p);
+  return first === '' ? 'its main chain' : first;
 }
 
-/** How much capital one farm position needs, from the protocol's own TVL. */
-function capitalFor(p: SnapshotProtocol): number {
+/** How much capital one farm position needs, from the protocol's own TVL: the tier. */
+function tierCapitalFor(p: SnapshotProtocol): number {
   if (p.tvl_usd >= 1_000_000_000) return 200;
   if (p.tvl_usd >= 100_000_000) return 100;
   if (p.tvl_usd >= 50_000_000) return 75;
   return 50;
 }
 
-/** Gas for one transaction on the protocol's deposit chain, in the words a farmer budgets with. */
+/**
+ * The plan's own deposit: max(TVL tier, pays_from) rounded up to the
+ * next $25, when pays_from (unrounded, so rounding cannot push the
+ * deposit's net below zero) exists and is at most the $1,000
+ * yardstick; otherwise the TVL tier — the verdict already says do not
+ * farm those rows. `paysExact` is null when the T-bill beats the plan
+ * at any size.
+ */
+export function planCapitalFor(p: SnapshotProtocol, paysExact: number | null): number {
+  const tier = tierCapitalFor(p);
+  if (paysExact === null || paysExact > TICKET_USD) return tier;
+  return Math.max(tier, roundUp25(paysExact));
+}
+
+/** The plan's deposit for a protocol, from its own record and implied value: the ticket's pays_from, recomputed here so the steps and the summary need no ticket. */
+export function planCapital(p: SnapshotProtocol, age: number | null, implied: number): number {
+  const chain = firstChainOf(p);
+  const txGas = gasTxUsd(chain);
+  const hold = holdDaysFor(age);
+  const weeks = Math.floor(hold / 7);
+  const gas = (GAS_FUNDING_TXS + GAS_DEPOSIT_CLAIM_TXS + GAS_WEEKLY_TXS * weeks) * txGas;
+  const rate = TICKET_SHARE * (implied / Math.max(1, p.tvl_usd)) - TBILL_RATE * (hold / 365);
+  return planCapitalFor(p, rate > 0 ? gas / rate : null);
+}
+
+/** Gas for one transaction on the protocol's deposit chain, in the words a farmer budgets with: the ASSUMED range whose midpoint gasTxUsd returns. */
 function gasFor(p: SnapshotProtocol): string {
   const chain = chainOf(p).toLowerCase();
   if (chain.includes('ethereum')) return 'about $6 to $12 of gas on Ethereum';
   if (chain.includes('solana')) return 'under $0.10 of gas on Solana';
   if (chain.includes('bitcoin')) return 'about $2 to $5 of gas on Bitcoin';
+  if (chain.includes('base')) return 'about $0.01 to $0.09 of gas on Base';
+  if (chain.includes('arbitrum')) return 'about $0.05 to $0.25 of gas on Arbitrum';
+  if (chain.includes('optimism')) return 'about $0.05 to $0.25 of gas on Optimism';
+  if (chain.includes('polygon')) return 'about $0.01 to $0.05 of gas on Polygon';
+  if (chain.includes('zksync')) return 'about $0.05 to $0.25 of gas on zkSync Era';
+  if (chain.includes('binance')) return 'about $0.05 to $0.15 of gas on Binance';
+  if (chain.includes('avalanche')) return 'about $0.10 to $0.50 of gas on Avalanche';
+  if (chain.includes('monad')) return 'about $0.01 to $0.09 of gas on Monad';
   return 'about $1 to $3 of gas';
 }
 
@@ -980,15 +1057,18 @@ function secondActionFor(p: SnapshotProtocol, capital: number, chain: string): s
  * names the concrete thing to do, what it costs and how long it takes:
  * a plan that only says "be active" is not a plan.
  */
-export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
+export function farmSteps(p: SnapshotProtocol, age: number | null, implied?: number): FarmStep[] {
   const chain = chainOf(p);
-  const capital = capitalFor(p);
+  const capital = implied === undefined ? tierCapitalFor(p) : planCapital(p, age, implied);
   const hold = holdDaysFor(age);
   const gas = gasFor(p);
+  const txGas = gasTxUsd(chainOf(p));
+  const fundingCost = `about ${fmtGasUsd(GAS_FUNDING_TXS * txGas)} of gas for the first transaction`;
+  const weeklyCost = `about ${fmtGasUsd(GAS_WEEKLY_TXS * txGas)} of gas a week`;
   return [
     {
       text: `Use a fresh wallet that holds only the funds you plan to farm, fund it from an exchange, and keep its seed phrase offline — never farm from the wallet that holds your savings.`,
-      cost: 'under $3 of gas for the first transaction',
+      cost: fundingCost,
       time: '5 minutes',
     },
     {
@@ -998,7 +1078,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
     },
     {
       text: secondActionFor(p, capital, chain),
-      cost: `about $2 of gas a week`,
+      cost: weeklyCost,
       time: '10 minutes a week',
     },
     {
@@ -1024,14 +1104,15 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   ];
 }
 
-/** One row's farm plan sized up: the capital, gas, hold and setup time the seven steps add up to. */
-export function farmSummary(p: SnapshotProtocol, age: number | null): FarmSummary {
+/** One row's farm plan sized up: the capital, gas, hold and setup time the seven steps add up to. The weekly gas is two transactions at the chain rate — the same dollars step 3 states and the ticket totals. */
+export function farmSummary(p: SnapshotProtocol, age: number | null, implied?: number): FarmSummary {
+  const txGas = gasTxUsd(chainOf(p));
   return {
-    capital_usd: capitalFor(p),
+    capital_usd: implied === undefined ? tierCapitalFor(p) : planCapital(p, age, implied),
     gas: gasFor(p),
     hold_days: holdDaysFor(age),
     setup_minutes: 35,
-    weekly_gas: 'about $2 of gas a week',
+    weekly_gas: `about ${fmtGasUsd(GAS_WEEKLY_TXS * txGas)} of gas a week`,
   };
 }
 
@@ -1106,6 +1187,7 @@ export function radarRow(
     farm_summary: farmSummary(
       { slug: row.slug, name: row.name, category: row.category, chains: row.chains, tvl_usd: row.tvl_usd, change_7d: row.change_7d, mcap_usd: row.mcap_usd, listed_at: row.listed_at, gecko_id: row.gecko_id, symbol: row.symbol },
       row.age_days,
+      row.implied_value_usd,
     ),
     on_watchlist: watch.has(row.slug),
   };

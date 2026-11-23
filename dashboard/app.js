@@ -94,50 +94,71 @@
     return Math.max(1, Math.round(curve * curveFactorOf(row.category) * growthMult * maturity * breadth));
   }
 
-  // Gas for one transaction, in dollars: the midpoints of the ranges the
-  // farm plan states in words, read off DATA.farm so the page and the
-  // board price gas from the same numbers. The snapshot carries no fee
-  // field, so these are labelled assumptions, not snapshot data; what
-  // the snapshot decides is which chain a row is priced on (below).
+  // Gas for one transaction, in dollars: the midpoints of the ASSUMED
+  // ranges the farm plan states in words, read off DATA.farm so the
+  // page and the board price gas from the same numbers. The snapshot
+  // carries no fee field, so these are labelled assumptions, not
+  // snapshot data; what the snapshot decides is which chain a row is
+  // priced on (below).
   function gasTxUsd(chain) {
     var c = (chain || '').toLowerCase();
     var g = DATA.farm.gas_tx;
     if (c.indexOf('ethereum') >= 0) return g.ethereum;
     if (c.indexOf('solana') >= 0) return g.solana;
     if (c.indexOf('bitcoin') >= 0) return g.bitcoin;
+    if (c.indexOf('base') >= 0) return g.base;
+    if (c.indexOf('arbitrum') >= 0) return g.arbitrum;
+    if (c.indexOf('optimism') >= 0) return g.optimism;
+    if (c.indexOf('polygon') >= 0) return g.polygon;
+    if (c.indexOf('zksync') >= 0) return g.zksync;
+    if (c.indexOf('binance') >= 0) return g.binance;
+    if (c.indexOf('avalanche') >= 0) return g.avalanche;
+    if (c.indexOf('monad') >= 0) return g.monad;
     return g.other;
   }
-  // The cheapest chain a protocol lists, by gasTxUsd — ties keep the
-  // first listed, so the choice is deterministic. The plan deposits
-  // there, so the plan's gas is the lowest the protocol's own chains
-  // support.
-  function cheapestChainOf(p) {
-    var best = '', bestGas = Infinity;
-    (p.chains || []).forEach(function (chain) {
-      var g = gasTxUsd(chain);
-      if (g < bestGas) { bestGas = g; best = chain; }
-    });
-    return best;
+  // The first chain a protocol lists. The plan deposits there: the
+  // snapshot's chains record only where a protocol has TVL, never
+  // whether its farmable product exists on a later-listed chain.
+  function firstChainOf(p) {
+    return (p.chains && p.chains.length) ? p.chains[0] : '';
   }
+  function fmtGas(n) { return n % 1 === 0 ? '$' + n : '$' + n.toFixed(2); }
 
   // The ticket, recomputed on the page from the row's own figures
   // so the number data.js carries can be checked, not trusted: the slice
-  // is the ticket's pro-rata share of the implied value if the share of
-  // the launch in DATA.farm goes to depositors, gas is the plan's own
-  // stated cost (funding, one transaction's gas to deposit and one to
-  // claim on the cheapest chain the protocol lists, weekly gas over the
-  // hold), and the ticket gives up the T-bill yield in DATA.farm — an
-  // assumption the page labels as one — while it sits in the position.
-  // FARM clears gas and the T-bill, THIN clears gas alone, SKIP does not
-  // cover its fees. The plan's own deposit is priced beside the yardstick
-  // with the same gas and the same assumed T-bill.
+  // is the ticket's pro-rata share if the assumed share of the launch
+  // in DATA.farm goes to depositors, gas is one scale at the chain
+  // rate (funding 1 tx + deposit/claim 2 tx + weekly 2 tx/week) on the
+  // first chain the protocol lists, and the ticket gives up the T-bill
+  // yield in DATA.farm — an assumption the page labels as one. FARM
+  // clears gas and the T-bill, THIN clears gas alone, SKIP does not
+  // cover its fees. The plan's own deposit is max(TVL tier, pays_from)
+  // rounded up to the next $25 when pays_from is at most $1,000.
+  function paysExactOf(row) {
+    var f = DATA.farm;
+    var txGas = gasTxUsd(firstChainOf(row));
+    var hold = holdDaysFor(row.age_days);
+    var weeks = Math.floor(hold / 7);
+    var gas = (f.gas_funding_txs + f.gas_deposit_claim_txs + f.gas_weekly_txs * weeks) * txGas;
+    var rate = f.share * (row.implied_value_usd / Math.max(1, row.tvl_usd)) - f.tbill_rate * (hold / 365);
+    return rate > 0 ? gas / rate : null;
+  }
+  function planCapitalOf(row) {
+    var tier = tierCapitalFor(row);
+    var pays = paysExactOf(row);
+    if (pays === null || pays > DATA.farm.ticket_usd) return tier;
+    return Math.max(tier, Math.ceil(pays / 25) * 25);
+  }
   function ticketOf(row) {
     var f = DATA.farm;
-    var chain = cheapestChainOf(row);
+    var chain = firstChainOf(row);
     var txGas = gasTxUsd(chain);
     var hold = holdDaysFor(row.age_days);
     var weeks = Math.floor(hold / 7);
-    var gas = f.gas_funding_usd + 2 * txGas + f.gas_weekly_usd * weeks;
+    var funding = f.gas_funding_txs * txGas;
+    var depClaim = f.gas_deposit_claim_txs * txGas;
+    var weekly = f.gas_weekly_txs * txGas;
+    var gas = funding + depClaim + weekly * weeks;
     var forgone = f.ticket_usd * f.tbill_rate * (hold / 365);
     var tvl = Math.max(1, row.tvl_usd);
     var slice = (f.ticket_usd * f.share * row.implied_value_usd) / tvl;
@@ -145,16 +166,19 @@
     var minutes = 35 + 10 * weeks + 10 + 10;
     var netPerHour = net / (minutes / 60);
     var rate = f.share * (row.implied_value_usd / tvl) - f.tbill_rate * (hold / 365);
-    var deposit = row.farm_summary.capital_usd;
+    var paysExact = rate > 0 ? gas / rate : null;
+    var deposit = planCapitalOf(row);
     var depositSlice = (deposit * f.share * row.implied_value_usd) / tvl;
     var depositForgone = deposit * f.tbill_rate * (hold / 365);
     var depositNet = depositSlice - gas - depositForgone;
     return {
-      ticket_usd: f.ticket_usd, slice_usd: round2(slice), gas_usd: round2(gas), gas_chain: chain, gas_tx_usd: round2(txGas),
+      ticket_usd: f.ticket_usd, slice_usd: round2(slice), gas_usd: round2(gas),
+      gas_funding_usd: round2(funding), gas_weekly_usd: round2(weekly), gas_deposit_claim_usd: round2(depClaim),
+      gas_chain: chain, gas_tx_usd: round2(txGas),
       forgone_usd: round2(forgone),
       net_usd: round2(net), net_per_hour_usd: round2(netPerHour),
       verdict: net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP',
-      pays_from_usd: rate > 0 ? Math.round(gas / rate) : null, hold_days: hold,
+      pays_from_usd: paysExact === null ? null : Math.round(paysExact), hold_days: hold,
       deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone),
       deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60))
     };
@@ -184,13 +208,12 @@
   // The farm plan is the same derivation main.ts writes to board.json:
   // category, chains, TVL and age decide the action, the capital, the
   // hold and every cost and time. No name is special-cased. The plan
-  // deposits on the cheapest chain the protocol lists, so its gas is
-  // the lowest the snapshot's own chain list supports.
+  // deposits on the first chain the protocol lists.
   function chainOf(p) {
-    var cheapest = cheapestChainOf(p);
-    return cheapest === '' ? 'its main chain' : cheapest;
+    var first = firstChainOf(p);
+    return first === '' ? 'its main chain' : first;
   }
-  function capitalFor(p) {
+  function tierCapitalFor(p) {
     if (p.tvl_usd >= 1e9) return 200;
     if (p.tvl_usd >= 1e8) return 100;
     if (p.tvl_usd >= 5e7) return 75;
@@ -201,6 +224,14 @@
     if (chain.indexOf('ethereum') >= 0) return 'about $6 to $12 of gas on Ethereum';
     if (chain.indexOf('solana') >= 0) return 'under $0.10 of gas on Solana';
     if (chain.indexOf('bitcoin') >= 0) return 'about $2 to $5 of gas on Bitcoin';
+    if (chain.indexOf('base') >= 0) return 'about $0.01 to $0.09 of gas on Base';
+    if (chain.indexOf('arbitrum') >= 0) return 'about $0.05 to $0.25 of gas on Arbitrum';
+    if (chain.indexOf('optimism') >= 0) return 'about $0.05 to $0.25 of gas on Optimism';
+    if (chain.indexOf('polygon') >= 0) return 'about $0.01 to $0.05 of gas on Polygon';
+    if (chain.indexOf('zksync') >= 0) return 'about $0.05 to $0.25 of gas on zkSync Era';
+    if (chain.indexOf('binance') >= 0) return 'about $0.05 to $0.15 of gas on Binance';
+    if (chain.indexOf('avalanche') >= 0) return 'about $0.10 to $0.50 of gas on Avalanche';
+    if (chain.indexOf('monad') >= 0) return 'about $0.01 to $0.09 of gas on Monad';
     return 'about $1 to $3 of gas';
   }
   function holdDaysFor(age) {
@@ -251,13 +282,14 @@
   }
   function farmSteps(p) {
     var chain = chainOf(p);
-    var capital = capitalFor(p);
+    var capital = planCapitalOf(p);
     var hold = holdDaysFor(p.age_days);
     var gas = gasFor(p);
+    var txGas = gasTxUsd(chain);
     return [
-      { text: 'Use a fresh wallet that holds only the funds you plan to farm, fund it from an exchange, and keep its seed phrase offline — never farm from the wallet that holds your savings.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
+      { text: 'Use a fresh wallet that holds only the funds you plan to farm, fund it from an exchange, and keep its seed phrase offline — never farm from the wallet that holds your savings.', cost: 'about ' + fmtGas(DATA.farm.gas_funding_txs * txGas) + ' of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and ' + gas, time: '15 minutes to set up' },
-      { text: secondActionFor(p, capital, chain), cost: 'about $2 of gas a week', time: '10 minutes a week' },
+      { text: secondActionFor(p, capital, chain), cost: 'about ' + fmtGas(DATA.farm.gas_weekly_txs * txGas) + ' of gas a week', time: '10 minutes a week' },
       { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot, and do the weekly action on the same day each week.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Before you withdraw, search the protocol name plus 'points', open only the official domain, and check whether your wallet qualifies on its own points or rewards page.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
       { text: "If a token ever launches, claim only from the protocol's own published link, verify the contract address twice, and never sign a blind approval.", cost: 'gas only, never a claim fee', time: '10 minutes at claim time' },
@@ -453,7 +485,7 @@
   function verdictCell(r) {
     var t = r.ticket || ticketOf(r);
     var cls = t.verdict === 'FARM' ? 'farm' : t.verdict === 'THIN' ? 'thin' : 'skipv';
-    var sub = 'dep ' + fmtDollars(t.deposit_usd) + ' · ' + (t.pays_from_usd === null ? 'never pays' : 'pays from ' + fmtDollars(t.pays_from_usd));
+    var sub = fmtDollars(t.deposit_usd) + ' · ' + (t.pays_from_usd === null ? 'never pays' : 'pays ' + fmtDollars(t.pays_from_usd));
     return el('td', null, el('div', { class: 'verdict' },
       el('span', { class: 'verdict-chip ' + cls, text: t.verdict }),
       el('span', { class: 'sub', text: sub })
@@ -514,7 +546,7 @@
       el('div', { class: 'hist-wrap' }, histogram(list), el('div', { class: 'hist-label sub', text: 'How the shown rows\u2019 implied values are distributed, log scale from $1M to $1B' })),
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Strongest implied value first. ' + fmtDollars(DATA.farm.ticket_usd) + ' slice: what the ticket gets if ' + Math.round(DATA.farm.share * 100) + '% of the launch goes to depositors. Net: slice minus gas and a forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill yield, per hour. Gas is priced on the cheapest chain each protocol lists; the snapshot carries no fee data, so per-chain gas is the stated range midpoint for that chain family.' }),
+          el('caption', { class: 'sub', text: 'Strongest implied value first. ' + fmtDollars(DATA.farm.ticket_usd) + ' slice: what the ticket gets if an assumed ' + Math.round(DATA.farm.share * 100) + '% of the launch goes to depositors. Net: slice minus gas and a forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill yield, per hour. Gas is priced on the first chain each protocol lists; the snapshot carries no fee data, so per-chain gas is an assumed range midpoint for that chain family.' }),
           el('thead', null, el('tr', null,
             sortHeader('implied', 'Rank'),
             sortHeader('name', 'Protocol'),
@@ -615,7 +647,7 @@
     var recomputed = impliedOf(row, DATA.model);
     var ticket = ticketOf(row);
     var carried = row.ticket || null;
-    var ticketOk = carried !== null && carried.slice_usd === ticket.slice_usd && carried.net_usd === ticket.net_usd && carried.verdict === ticket.verdict && carried.deposit_net_usd === ticket.deposit_net_usd && carried.gas_chain === ticket.gas_chain;
+    var ticketOk = carried !== null && carried.slice_usd === ticket.slice_usd && carried.net_usd === ticket.net_usd && carried.verdict === ticket.verdict && carried.deposit_net_usd === ticket.deposit_net_usd && carried.gas_chain === ticket.gas_chain && carried.gas_usd === ticket.gas_usd;
     var chains = row.chains && row.chains.length ? row.chains.slice(0, 4).join(', ') + (row.chains.length > 4 ? ' and ' + (row.chains.length - 4) + ' more' : '') : 'an unnamed chain';
     dialog.appendChild(el('div', { class: 'detail-head' },
       el('div', null,
@@ -680,7 +712,7 @@
         el('span', null, el('b', { text: row.farm_summary.hold_days + ' days' }), ' hold'),
         el('span', null, el('b', { text: '~' + row.farm_summary.setup_minutes + ' min' }), ' to set up')
       ),
-      el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ' &middot; gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' &middot; forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ' &middot; net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) &mdash; <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ' &middot; never pays' : ' &middot; pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ' &middot; net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
+      el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ' &middot; gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' (' + fmtMoney(ticket.gas_funding_usd) + ' funding + ' + fmtMoney(ticket.gas_deposit_claim_usd) + ' deposit/claim + ' + fmtMoney(ticket.gas_weekly_usd * Math.floor(ticket.hold_days / 7)) + ' weekly) &middot; forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ' &middot; net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) &mdash; <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ' &middot; never pays' : ' &middot; pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ' &middot; net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: ');
         var action = at >= 0 ? s.slice(0, at) : s;
