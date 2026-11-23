@@ -84,6 +84,11 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .hist{display:flex;align-items:flex-end;gap:2px;height:24px}
 .hist i{flex:1;background:var(--teal);opacity:.75;border-radius:2px 2px 0 0;min-height:2px}
 .hist-label{padding:2px 2px 0;font-size:12px}
+.scatter{width:100%;display:block}
+.ledger-bar{display:flex;height:14px;border-radius:99px;overflow:hidden;margin:6px 0 2px}
+.ledger-bar i{display:block;height:100%}
+.limits ul{margin:6px 0;padding-left:20px;color:var(--muted);font-size:13px}
+.limits li{margin:2px 0}
 .empty{padding:36px;text-align:center}
 .empty h2{margin:0 0 6px}
 .empty p{color:var(--muted);margin:0 0 14px}

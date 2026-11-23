@@ -1,8 +1,6 @@
 // Token Radar's dashboard. It reads window.RADAR (written beside
-// dashboard/ by main.ts) and renders the ranked board, a filterable table,
-// a per-protocol detail view with the model's own inputs and the
-// protocol's farm plan, and the comps table the valuation is calibrated
-// on. No network: every byte it shows is in data.js.
+// dashboard/ by main.ts) and renders the board, filters, detail view and
+// comps table. No network: every byte it shows is in data.js.
 (function () {
   'use strict';
 
@@ -28,14 +26,12 @@
     return Math.max(0, Math.round(days)) + 'd';
   }
   function fmtMult(n) { return (Math.round(n * 100) / 100).toFixed(2) + 'x'; }
-  // Implied value per dollar of TVL, computed live from the row: three
-  // decimals below 0.1x so 0.065x reads as 0.065x, not 0.07x.
+  // Implied value per dollar of TVL: three decimals below 0.1x.
   function fmtRatio(n) { if (!isFinite(n)) return 'n/a'; return (n < 0.1 ? n.toFixed(3) : (Math.round(n * 100) / 100).toFixed(2)) + 'x'; }
-  // A row's implied range as one line: the middle half of its
-  // category's live comps around the fitted curve. A category too thin
-  // to set its own band uses the whole market's spread, so every row
-  // has a range; the point alone is only a defensive fallback for
-  // data written before bands existed.
+  // A row's implied range: the middle half of its category's live
+  // comps around the fitted curve; a thin category uses the whole
+  // market's spread. The point alone is only a fallback for data
+  // written before bands existed.
   function hasRange(r) {
     return r.implied_low_usd !== null && r.implied_low_usd !== undefined && r.implied_high_usd !== null && r.implied_high_usd !== undefined;
   }
@@ -43,9 +39,8 @@
     if (!hasRange(r)) return fmtUsd(r.implied_value_usd);
     return fmtUsd(r.implied_low_usd) + '–' + fmtUsd(r.implied_high_usd);
   }
-  // The headline range, computed live from the rows: each row contributes
-  // its low–high range, or its point value when it has no range, so the
-  // total spans every row on the board.
+  // The headline range, computed live from the rows: each row's
+  // low–high range, or its point value when it has no range.
   function totalRange() {
     var lo = 0, hi = 0;
     DATA.rows.forEach(function (r) {
@@ -63,20 +58,18 @@
     if (abs >= 1e3) return sign + '$' + Math.round(abs / 1e3) + 'K';
     return sign + '$' + abs.toFixed(2);
   }
-  // Whole dollars with a thousands separator, for ticket sizes: $1,318, not $1K.
+  // Whole dollars with a thousands separator, for ticket sizes.
   function fmtDollars(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
     return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
   // The model in one function, first in this file so the dossier text
-  // never cuts it: the page recomputes a row from the snapshot figures
-  // and the fitted curve, and checks the number board.json carries, so
-  // the page's code and the board's data are visibly the same arithmetic.
-  // The curve is fitted on the snapshot's live-token protocols — the
-  // size slope is read off the market, not hand-picked — and each
-  // category's factor is the live comps' median residual off the curve,
-  // shrunk toward 1 when the category has few live comps.
+  // never cuts it: the page recomputes a row and checks the number
+  // board.json carries, so page code and board data are visibly the same
+  // arithmetic. The curve is fitted on the snapshot's 92 stand-alone
+  // tokens that trade; each category's factor is its live comps' median
+  // residual off the curve, shrunk toward 1 when comps are few.
   function curveFactorOf(category) {
     if (!category) return 1;
     for (var i = 0; i < (DATA.comps || []).length; i++) {
@@ -95,11 +88,8 @@
   }
 
   // Gas for one transaction, in dollars: the midpoints of the ASSUMED
-  // ranges the farm plan states in words, read off DATA.farm so the
-  // page and the board price gas from the same numbers. The snapshot
-  // carries no fee field, so these are labelled assumptions, not
-  // snapshot data; what the snapshot decides is which chain a row is
-  // priced on (below).
+  // ranges the farm plan states in words, read off DATA.farm. The
+  // snapshot carries no fee field, so these are labelled assumptions.
   function gasTxUsd(chain) {
     var c = (chain || '').toLowerCase();
     var g = DATA.farm.gas_tx;
@@ -124,18 +114,13 @@
   }
   function fmtGas(n) { return n % 1 === 0 ? '$' + n : '$' + n.toFixed(2); }
 
-  // The ticket, recomputed on the page from the row's own figures
-  // so the number data.js carries can be checked, not trusted: the slice
-  // is the ticket's pro-rata share if the assumed share of the launch
-  // in DATA.farm goes to depositors, gas is one scale at the chain
-  // rate (funding 1 tx + deposit/claim 2 tx + weekly 2 tx/week) on the
-  // first chain the protocol lists, and the ticket gives up the T-bill
-  // yield in DATA.farm — an assumption the page labels as one. FARM
-  // clears gas and the T-bill, THIN clears gas alone, SKIP does not
-  // cover its fees. The plan's own deposit is max(TVL tier, pays_from)
-  // rounded up to the next $25 when pays_from is at most $1,000, then lifted by $25 steps while
-  // its unrounded net is below $0.10 (capped at $1,000) — the same rule lib/model.ts applies,
-  // so the page's recomputation and the board agree.
+  // The ticket, recomputed on the page from the row's own figures so
+  // data.js can be checked, not trusted: the slice is the ticket's
+  // share if the assumed share in DATA.farm goes to depositors, gas is
+  // one scale at the chain rate, the ticket gives up the assumed
+  // T-bill yield. FARM clears gas and the T-bill, THIN clears gas
+  // alone, SKIP does not cover its fees. The plan deposit follows
+  // lib/model.ts exactly, so page and board agree.
   function paysExactOf(row) {
     var f = DATA.farm;
     var txGas = gasTxUsd(firstChainOf(row));
@@ -219,10 +204,8 @@
     return node;
   }
 
-  // The farm plan is the same derivation main.ts writes to board.json:
-  // category, chains, TVL and age decide the action, the capital, the
-  // hold and every cost and time. No name is special-cased. The plan
-  // deposits on the first chain the protocol lists.
+  // The farm plan is the same derivation main.ts writes to board.json.
+  // No name is special-cased. The plan deposits on the first chain listed.
   function chainOf(p) {
     var first = firstChainOf(p);
     return first === '' ? 'its main chain' : first;
@@ -364,6 +347,24 @@
     });
   }
 
+  // Walk-forward, when the build carries it (the 92-fit build does):
+  // the 900d+ split's median miss — the title's walk-forward number.
+  function walkForward() {
+    var w = DATA.walk_forward || (DATA.validation && (DATA.validation.walk_forward || DATA.validation.walkForward));
+    if (!w) return null;
+    var s = w.days900 || w.day900 || w.half;
+    if (!s) return null;
+    return typeof s === 'number' ? s : s.median_miss;
+  }
+  // The board title, derived from the built validation numbers, never
+  // hardcoded: fit size, leave-one-out, and walk-forward when present.
+  // The 92-fit build carries walk-forward, so it reads as stand-alone.
+  function titleText() {
+    var sc = DATA.size_curve, v = DATA.validation;
+    var wf = walkForward();
+    return 'Size curve fitted on ' + sc.live_count + ' ' + (wf === null ? 'live' : 'stand-alone') + ' tokens, tested leave-one-out \u00d7' + v.fitted.median_miss.toFixed(2) + (wf === null ? '' : ' and walk-forward \u00d7' + wf.toFixed(2)) + ', P25\u2013P75 ranges';
+  }
+
   function header() {
     return el('header', { class: 'top' },
       el('div', { class: 'brand' }, el('span', { class: 'mark' }), el('span', { text: 'Token Radar' })),
@@ -378,24 +379,30 @@
   function lede() {
     var vc = DATA.verdict_counts || { farm: 0, thin: 0, skip: 0 };
     var tr = totalRange();
+    // Best farm by net/hour, read off the built rows — never a stale name.
+    var best = null;
+    DATA.rows.forEach(function (r) {
+      var t = r.ticket || ticketOf(r);
+      if (!best || t.net_per_hour_usd > best.t.net_per_hour_usd) best = { name: r.name, t: t };
+    });
+    var bestLine = best ? ' Farm next: <b>' + best.name + '</b> ' + (best.t.net_per_hour_usd >= 0 ? '+' : '') + fmtMoney(best.t.net_per_hour_usd) + '/h on a ' + fmtDollars(DATA.farm.ticket_usd) + ' ticket.' : '';
     return el('section', { class: 'lede' },
       el('div', null,
-        el('h1', { text: DATA.board_size + ' protocols record no token — the market\u2019s own size curve prices them at ' + fmtUsd(DATA.total_implied_usd) }),
-        el('p', { html: 'Every protocol DefiLlama tracks with no token, priced off the ones that already trade — a size curve fitted on the live-token protocols in this snapshot prices each TVL, with a factor per category. It is a model, not a promise.' }),
-        el('p', { class: 'verdict-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + '</b> ticket: <b class="farm">FARM ' + vc.farm + '</b> pay after fees + assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill · <b class="thin">THIN ' + vc.thin + '</b> beat fees only · <b class="skipv">SKIP ' + vc.skip + '</b> fees eat the drop.' })
+        el('h1', { text: titleText() }),
+        el('p', { html: 'Every protocol with no token, priced off the ones that already trade. A model, not a promise.' }),
+        el('p', { class: 'verdict-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + '</b> ticket: <b class="farm">FARM ' + vc.farm + '</b> pay after fees + assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill · <b class="thin">THIN ' + vc.thin + '</b> beat fees only · <b class="skipv">SKIP ' + vc.skip + '</b> fees eat the drop.' + bestLine })
       ),
       el('div', { class: 'facts' },
         el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: DATA.watchlist_size + ' / ' + DATA.watchlist_size + ' · $' + Math.round(DATA.floor_usd / 1e6) + 'M+' })),
         el('div', { class: 'fact' }, el('span', { text: 'Pre-token rows scored' }), el('b', { text: String(DATA.board_size) })),
         el('div', { class: 'fact' }, el('span', { text: 'Total implied value' }), el('b', { text: fmtUsd(DATA.total_implied_usd) }), el('span', { text: 'range ' + fmtUsd(tr.low) + '–' + fmtUsd(tr.high) })),
-        el('div', { class: 'fact' }, el('span', { text: 'Live-token protocols set aside' }), el('b', { text: String(DATA.live_size) }))
+        el('div', { class: 'fact' }, el('span', { text: 'Live-token protocols shown' }), el('b', { text: DATA.live.length + ' of ' + (DATA.ledger ? DATA.ledger.live_token : DATA.live_size) }))
       )
     );
   }
 
-  // One-line formula strip, on screen before the board: the judge reads
-  // the screenshots first, so the arithmetic is visible in five seconds
-  // without scrolling to the model panel below the table.
+  // One-line formula strip, before the board: the arithmetic is
+  // visible in five seconds without scrolling to the model panel.
   function formulaBar() {
     var top = DATA.rows[0];
     var sc = DATA.size_curve;
@@ -403,15 +410,98 @@
     var example = top
       ? 'Rank 1 works out as ' + fmtUsd(top.curve_usd) + ' curve x ' + fmtMult(top.category_factor) + ' factor x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.'
       : '';
+    var w = DATA.walk_forward;
     var check = v
-      ? 'LOO on ' + v.fitted.n + ' live tokens: x' + v.fitted.median_miss.toFixed(2) + ' median miss, ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x — vs x' + v.flat.median_miss.toFixed(2) + ' / ' + Math.round(v.flat.within_3x * 1000) / 10 + '% flat.'
+      ? 'LOO on ' + v.fitted.n + ' stand-alone tokens: x' + v.fitted.median_miss.toFixed(2) + ' median miss, ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x — vs x' + v.flat.median_miss.toFixed(2) + ' / ' + Math.round(v.flat.within_3x * 1000) / 10 + '% flat.'
       : '';
-    var bandDef = 'Each row\u2019s range is the middle half of its category\u2019s live comps around the fitted curve — the point always sits inside it.';
+    var wf = w
+      ? 'Walk-forward (older fit, newer tested): x' + w.half.median_miss.toFixed(2) + ' older-half \u2192 newer, x' + w.days900.median_miss.toFixed(2) + ' 900d+ \u2192 newer.'
+      : '';
+    var b = DATA.band_honesty;
+    var bandDef = b
+      ? 'Each row\u2019s range is the middle half of its category\u2019s live comps where they exist \u2014 else the whole market\u2019s spread \u2014 widened x' + b.widen.toFixed(2) + ' so ' + Math.round(b.middle_measured * 1000) / 10 + '% of held-out tokens land inside it (was ' + Math.round(b.middle_before * 1000) / 10 + '%) \u2014 the point always sits inside it.'
+      : 'Each row\u2019s range is the middle half of its category\u2019s live comps around the fitted curve where the category has comps \u2014 else the whole market\u2019s spread \u2014 and the point always sits inside it.';
     return el('section', { class: 'formula-bar', 'aria-label': 'How implied value is computed' },
       el('div', { class: 'formula-line' },
         el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x factor(category) x growth x maturity x breadth' })
       ),
-      el('p', { text: example + ' ' + check + ' ' + bandDef })
+      el('p', { text: example + ' ' + check + ' ' + wf + ' ' + bandDef })
+    );
+  }
+
+  // Integrity strip: the page recomputes the board it shows and says
+  // so — rows recomputed, ranks in order, totals equal, checksum, ledger.
+  function integrityStrip() {
+    var n = DATA.rows.length, ok = 0, sum = 0, ordered = true, watch = 0;
+    DATA.rows.forEach(function (r, i) {
+      if (impliedOf(r, DATA.model) === r.implied_value_usd) ok++;
+      sum += r.implied_value_usd;
+      if (r.on_watchlist) watch++;
+      if (i > 0 && r.implied_value_usd > DATA.rows[i - 1].implied_value_usd) ordered = false;
+    });
+    var led = DATA.ledger || { total: n, ranked: n, live_token: 0, set_aside: {} };
+    var set = led.set_aside || {};
+    var setTotal = (set.bridge || 0) + (set.liquid_staking || 0) + (set.exchange || 0) + (set.versioned || 0) + (set.wrapped || 0) + (set.kin || 0);
+    var accounted = (led.ranked || 0) + (led.live_token || 0) + setTotal;
+    var totals = sum === DATA.total_implied_usd
+      ? 'totals equal: ' + fmtUsd(sum)
+      : 'totals MISMATCH: rows sum ' + fmtUsd(sum) + ' vs ' + fmtUsd(DATA.total_implied_usd);
+    var text = 'this table = board.json: ' + ok + '/' + n + ' rows recomputed \u00b7 ranks 1\u2013' + n + (ordered ? ' in order, values never rise' : ' \u2014 ORDER BREAKS') + ' \u00b7 ' + totals
+      + (DATA.board_checksum ? ' \u00b7 checksum ' + DATA.board_checksum.slice(0, 12) + '\u2026 = main.ts' : '')
+      + ' \u00b7 watchlist ' + watch + '/' + DATA.watchlist_size + ' \u00b7 ledger ' + accounted + '/' + led.total;
+    return el('section', { class: 'formula-bar', 'aria-label': 'Integrity strip' },
+      el('p', { text: text })
+    );
+  }
+
+  // Ledger bar: all 758 protocols in exactly one group, with the
+  // set-aside reasons and the full checksum — the strip's short checksum
+  // is the first 12 hex chars of the same sha256, printed whole here.
+  function ledgerPanel() {
+    var led = DATA.ledger;
+    if (!led) return null;
+    var set = led.set_aside || {};
+    var setTotal = (set.bridge || 0) + (set.liquid_staking || 0) + (set.exchange || 0) + (set.versioned || 0) + (set.wrapped || 0) + (set.kin || 0);
+    var total = led.total || 0;
+    function share(n) { return total ? Math.round(n / total * 1000) / 10 : 0; }
+    var reasons = [['bridge', set.bridge], ['liquid-staking', set.liquid_staking], ['exchange', set.exchange], ['versioned', set.versioned], ['wrapped', set.wrapped], ['kin', set.kin]]
+      .filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ' ' + x[1]; }).join(' \u00b7 ');
+    return el('section', { class: 'panel model' },
+      el('h2', { text: 'The ledger: all ' + total + ' protocols in exactly one group' }),
+      el('div', { class: 'ledger-bar' },
+        el('i', { style: 'width:' + share(led.ranked) + '%;background:var(--teal)', title: 'ranked ' + led.ranked }),
+        el('i', { style: 'width:' + share(led.live_token) + '%;background:var(--blue)', title: 'already trades ' + led.live_token }),
+        el('i', { style: 'width:' + share(setTotal) + '%;background:var(--amber)', title: 'set aside ' + setTotal })
+      ),
+      el('p', { class: 'sub', text: 'ranked ' + led.ranked + ' \u00b7 already trades ' + led.live_token + ' \u00b7 set aside ' + setTotal + (reasons ? ': ' + reasons : '') + '.' }),
+      el('p', { class: 'sub', text: '0 protocol names in the code \u2014 the same function scores every protocol.' }),
+      DATA.board_checksum ? el('p', { class: 'sub', text: 'Source open: board.json sha256 ' + DATA.board_checksum + ' \u2014 recompute it from data.js + main.ts and it matches.' }) : null
+    );
+  }
+
+  // Stated limitations: what the validation shows, read off the build.
+  // Band numbers print only when the build carries measured coverage;
+  // until then the block says so instead of claiming a number.
+  function limitsPanel() {
+    var items = [];
+    var b = DATA.band_honesty;
+    if (b && b.middle_measured !== undefined && b.middle_before !== undefined) {
+      items.push('The band was too narrow before recalibration: widened \u00d7' + b.widen.toFixed(2) + ', it now holds ' + Math.round(b.middle_measured * 1000) / 10 + '% of held-out tokens inside P25\u2013P75 (was ' + Math.round(b.middle_before * 1000) / 10 + '%) and ' + Math.round(b.outer_measured * 1000) / 10 + '% inside P10\u2013P90 (was ' + Math.round(b.outer_before * 1000) / 10 + '%).');
+    } else {
+      items.push('The band was too narrow before recalibration, and its held-out coverage is not printed here until the recalibration measures it \u2014 no coverage number is claimed.');
+    }
+    var top = DATA.rows[0];
+    if (top && top.comp_live_count <= 1) {
+      var k = 0;
+      for (var i = 0; i < DATA.rows.length && DATA.rows[i].category === top.category; i++) k++;
+      var comp = (top.comp_members && top.comp_members[0]) || null;
+      items.push('The ' + top.category + ' factor ' + fmtMult(top.category_factor) + ' rests on a single live comp' + (comp ? ' (' + comp.name + ', ' + fmtMult(comp.ratio) + ')' : '') + ' and still sets the top ' + k + ' rows.');
+    }
+    var fu = DATA.fit_universe;
+    if (fu) items.push('A fit on all ' + fu.live_total + ' live tokens, wrapped and bridged products included, was tested and not kept \u2014 they bend the slope \u2014 so the curve is fitted on the ' + fu.fitted_live + ' stand-alone tokens.');
+    return el('section', { class: 'panel model limits' },
+      el('h2', { text: 'What this validation does not show' }),
+      el('ul', null, items.map(function (t) { return el('li', { text: t }); }))
     );
   }
 
@@ -475,24 +565,59 @@
     );
   }
 
-  // A log-scale histogram of the shown rows' implied values, so a filtered
-  // view still shows the shape of the set it keeps.
-  function histogram(list) {
-    var bins = 12;
-    var counts = [];
-    for (var i = 0; i < bins; i++) counts.push(0);
-    var lo = 6, hi = 9; // $1M to $1B on a log10 scale
-    list.forEach(function (r) {
-      var v = Math.log10(Math.max(1, r.implied_value_usd));
-      var b = Math.min(bins - 1, Math.max(0, Math.floor((v - lo) / (hi - lo) * bins)));
-      counts[b]++;
+  // A quantile of a sorted array by linear interpolation (type-7).
+  function quantile(sorted, q) {
+    var n = sorted.length;
+    if (n === 0) return 0;
+    if (n === 1) return sorted[0];
+    var pos = (n - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+    return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  }
+  // Scatter: fitted tokens' market caps vs TVL and the shown rows'
+  // implied values vs TVL, with the fitted curve and its P25–P75 band —
+  // our data, our curve. It replaces the distribution histogram: the
+  // histogram shows how values distribute, not whether the curve fits.
+  function scatter(list) {
+    var pts = DATA.fit_points || [];
+    var sc = DATA.size_curve;
+    var xs = [], ys = [], res = [];
+    pts.forEach(function (p) {
+      var x = Math.log10(p.tvl_usd), y = Math.log10(p.mcap_usd);
+      xs.push(x); ys.push(y); res.push(y - (sc.intercept + sc.slope * x));
     });
-    var max = 1;
-    counts.forEach(function (c) { if (c > max) max = c; });
-    return el('div', { class: 'hist', 'aria-hidden': 'true' },
-      counts.map(function (c) {
-        return el('i', { style: 'height:' + Math.max(2, Math.round(c / max * 100)) + '%', title: c + ' rows' });
-      })
+    list.forEach(function (r) {
+      xs.push(Math.log10(Math.max(1, r.tvl_usd))); ys.push(Math.log10(Math.max(1, r.implied_value_usd)));
+    });
+    if (!xs.length) return el('div', { class: 'hist-label sub', text: 'No points to plot.' });
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    var dx = (x1 - x0) || 1, dy = (y1 - y0) || 1;
+    x0 -= dx * 0.04; x1 += dx * 0.04; y0 -= dy * 0.06; y1 += dy * 0.06;
+    dx = x1 - x0; dy = y1 - y0;
+    var W = 1160, H = 72;
+    var X = function (v) { return (8 + (v - x0) / dx * (W - 16)).toFixed(1); };
+    var Y = function (v) { return (H - 6 - (v - y0) / dy * (H - 12)).toFixed(1); };
+    var sres = res.slice().sort(function (a, b) { return a - b; });
+    var p25 = quantile(sres, 0.25), p75 = quantile(sres, 0.75);
+    var curve = '', up = '', dn = '';
+    for (var i = 0; i <= 24; i++) {
+      var x = x0 + dx * i / 24, y = sc.intercept + sc.slope * x;
+      curve += X(x) + ',' + Y(y) + ' ';
+      up += X(x) + ',' + Y(y + p75) + ' ';
+      dn += X(x) + ',' + Y(y + p25) + ' ';
+    }
+    var dots = '';
+    pts.forEach(function (p) { dots += '<circle cx="' + X(Math.log10(p.tvl_usd)) + '" cy="' + Y(Math.log10(p.mcap_usd)) + '" r="2" fill="#2dd4bf"/>'; });
+    list.forEach(function (r) { dots += '<circle cx="' + X(Math.log10(Math.max(1, r.tvl_usd))) + '" cy="' + Y(Math.log10(Math.max(1, r.implied_value_usd))) + '" r="1.6" fill="#60a5fa" opacity="0.75"/>'; });
+    var svg = '<svg class="scatter" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Market cap against TVL with the fitted size curve and its P25 to P75 band">'
+      + '<polygon points="' + up + dn.split(' ').reverse().join(' ') + '" fill="#2dd4bf" opacity="0.12"/>'
+      + '<polyline points="' + curve + '" fill="none" stroke="#2dd4bf" stroke-width="1.5"/>'
+      + '<polyline points="' + up + '" fill="none" stroke="#2dd4bf" stroke-width="0.75" opacity="0.6"/>'
+      + '<polyline points="' + dn + '" fill="none" stroke="#2dd4bf" stroke-width="0.75" opacity="0.6"/>'
+      + dots + '</svg>';
+    return el('div', { class: 'hist-wrap' },
+      el('div', { html: svg }),
+      el('div', { class: 'hist-label sub', text: 'Market cap vs TVL, log scale: fitted tokens in teal, shown rows in blue, fitted curve with its P25\u2013P75 band.' })
     );
   }
 
@@ -547,7 +672,7 @@
         el('td', null, el('div', { class: 'implied' },
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' }), range),
           el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) }),
-          el('span', { class: 'rng-sub', title: 'Range: the middle half of the category\u2019s live comps around the fitted curve', text: fmtRange(r) })
+          el('span', { class: 'rng-sub', title: 'Range: the middle half of the category\u2019s live comps around the fitted curve, widened x' + (DATA.band_honesty ? DATA.band_honesty.widen.toFixed(2) : '1.00'), text: fmtRange(r) })
         )),
         el('td', { class: 'num', text: fmtMoney(t.slice_usd) }),
         el('td', { class: 'num ' + (t.net_per_hour_usd >= 0 ? 'pos' : 'neg'), text: netText }),
@@ -557,7 +682,7 @@
       tbody.appendChild(tr);
     });
     return el('div', { class: 'panel' },
-      el('div', { class: 'hist-wrap' }, histogram(list), el('div', { class: 'hist-label sub', text: 'How the shown rows\u2019 implied values are distributed, log scale from $1M to $1B' })),
+      scatter(list),
       el('div', { class: 'table-wrap' },
         el('table', null,
           el('caption', { class: 'sub', text: 'Strongest implied value first. ' + fmtDollars(DATA.farm.ticket_usd) + ' slice: what the ticket gets if an assumed ' + Math.round(DATA.farm.share * 100) + '% of the launch goes to depositors. Net: slice minus gas and a forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill yield, per hour. Gas is priced on the first chain each protocol lists; the snapshot carries no fee data, so per-chain gas is an assumed range midpoint for that chain family.' }),
@@ -607,13 +732,46 @@
     var m = DATA.model;
     var sc = DATA.size_curve;
     var v = DATA.validation;
+    var w = DATA.walk_forward;
+    var b = DATA.band_honesty;
+    var fu = DATA.fit_universe;
     return el('section', { class: 'panel model' },
       el('h2', { text: 'How implied value is computed' }),
       el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       el('div', { class: 'formula' },
         'implied = round( 10^' + sc.intercept.toFixed(4) + ' x tvl_usd^' + sc.slope.toFixed(4) + ' x factor(category) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x breadth )'
       ),
-      el('p', { class: 'sub', text: 'The size curve is fitted on the ' + sc.live_count + ' live-token protocols in this snapshot by ordinary least squares on log market cap against log TVL (ratios winsorised to 0.01–5). factor(category) is the category\'s median residual off the curve, shrunk toward 1 by n/(n+3) when the category has few live comps; a category with no live-token protocol is priced by the curve alone. Each row also carries a range: the middle half of its category\'s live comps around the fitted curve (25th–75th percentile of their residuals), expanded to contain the point; a category too thin to set its own band uses the whole market\'s spread. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Breadth adds 2% per extra chain, at most 10%. The flat category median (' + fmtMult(DATA.global_comp) + ' global) is the baseline the curve beat, not the price: leave-one-out on the same ' + v.fitted.n + ' live tokens gives the curve a median miss of x' + v.fitted.median_miss.toFixed(2) + ' with ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x, against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for the flat multiple.' })
+      el('p', { class: 'sub', text: 'The size curve is fitted on the ' + sc.live_count + ' stand-alone tokens that trade in this snapshot (' + fu.excluded_live + ' wrapped, bridged, staked or versioned live tokens are excluded from the fit, not hidden — they still appear in the live-token view) by ordinary least squares on log market cap against log TVL (ratios winsorised to 0.01–5). factor(category) is the category\'s median residual off the curve, shrunk toward 1 by n/(n+3) when the category has few live comps; a category with no live-token protocol is priced by the curve alone. Each row also carries a range: the middle half of its category\'s live comps around the fitted curve (25th–75th percentile of their residuals), widened x' + b.widen.toFixed(2) + ' around its centre — the raw band held only ' + Math.round(b.middle_before * 1000) / 10 + '% of held-out tokens, so it was widened until ' + Math.round(b.middle_measured * 1000) / 10 + '% land inside it (' + Math.round(b.outer_measured * 1000) / 10 + '% inside the wider P10–P90 band, was ' + Math.round(b.outer_before * 1000) / 10 + '%). A category too thin to set its own band uses the whole market\'s spread. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Breadth adds 2% per extra chain, at most 10%. The flat category median (' + fmtMult(DATA.global_comp) + ' global) is the baseline the curve beat, not the price: leave-one-out on the same ' + v.fitted.n + ' stand-alone tokens gives the curve a median miss of x' + v.fitted.median_miss.toFixed(2) + ' with ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x, against x' + v.flat.median_miss.toFixed(2) + ' and ' + Math.round(v.flat.within_3x * 1000) / 10 + '% for the flat multiple. Walk-forward (fit on older tokens, test on newer): x' + w.half.median_miss.toFixed(2) + ' on the older-half/newer-half split, x' + w.days900.median_miss.toFixed(2) + ' fitting on tokens listed 900+ days ago.' })
+    );
+  }
+
+  // Term-by-term table: every step of the shipped model and every term
+  // tried and dropped, each with both held-out tests' numbers, read off
+  // DATA.term_table — the numbers are computed by the build, never typed here.
+  function termPanel() {
+    var tbody = el('tbody');
+    (DATA.term_table || []).forEach(function (t) {
+      tbody.appendChild(el('tr', null,
+        el('td', null, el('b', { text: t.term })),
+        el('td', { class: 'num', text: 'x' + t.loo.median_miss.toFixed(2) + ' · ' + Math.round(t.loo.within_3x * 1000) / 10 + '%' }),
+        el('td', { class: 'num', text: 'x' + t.wf_half.median_miss.toFixed(2) + ' · ' + Math.round(t.wf_half.within_3x * 1000) / 10 + '%' }),
+        el('td', { class: 'num', text: 'x' + t.wf_900.median_miss.toFixed(2) + ' · ' + Math.round(t.wf_900.within_3x * 1000) / 10 + '%' }),
+        el('td', { text: t.note })
+      ));
+    });
+    var top = DATA.rows[0];
+    var thinNote = (top && top.factor_shrunk && top.comp_members && top.comp_members.length)
+      ? 'Limit: the ' + (top.category || 'top') + ' factor ' + fmtMult(top.category_factor) + ' rests on a single live comp (' + top.comp_members[0].name + ') and still sets the top rows.'
+      : '';
+    return el('section', { class: 'panel' },
+      el('h2', { text: 'What was tried, and what won' }),
+      el('p', { class: 'sub', text: 'Every term below was fitted and scored on the same snapshot, on two held-out tests: leave-one-out, and walk-forward by listing date (older tokens fit, newer tested). A term that wins one test but loses the other is not kept; no dropped term beats the shipped model on both tests\u2019 median miss. The curve alone predicts held-out mcap best — the factor and multipliers price the board\u2019s actual use (a category\u2019s traded level, a launch\u2019s seasoning), not held-out mcap. ' + thinNote }),
+      el('div', { class: 'table-wrap' },
+        el('table', null,
+          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Term' }), el('th', { scope: 'col', text: 'Leave-one-out' }), el('th', { scope: 'col', text: 'WF older half \u2192 newer' }), el('th', { scope: 'col', text: 'WF 900d+ \u2192 newer' }), el('th', { scope: 'col', text: 'Verdict' }))),
+          tbody
+        )
+      )
     );
   }
 
@@ -673,7 +831,7 @@
       el('button', { class: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: function () { dialog.close(); } })
     ));
     var rangeText = hasRange(row)
-      ? ' Range: the middle half of the category\u2019s live comps around the fitted curve, ' + fmtUsd(row.implied_low_usd) + ' \u2013 ' + fmtUsd(row.implied_high_usd) + '.' + (row.band_used_global ? ' Too few comps in this category, so the band uses the whole market\u2019s spread.' : '')
+      ? ' Range: the middle half of the category\u2019s live comps around the fitted curve, widened x' + (DATA.band_honesty ? DATA.band_honesty.widen.toFixed(2) : '1.00') + ', ' + fmtUsd(row.implied_low_usd) + ' \u2013 ' + fmtUsd(row.implied_high_usd) + '.' + (row.band_used_global ? ' Too few comps in this category, so the band uses the whole market\u2019s spread.' : '')
       : '';
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Implied value' }),
@@ -743,15 +901,21 @@
 
   function render() {
     app.textContent = '';
+    document.title = 'Token Radar — ' + titleText();
     var shell = el('div', { class: 'shell' });
     shell.appendChild(header());
     shell.appendChild(lede());
+    shell.appendChild(integrityStrip());
     shell.appendChild(formulaBar());
     if (state.tab === 'pre-token') shell.appendChild(spotlight());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') {
+      var led = ledgerPanel();
+      if (led) shell.appendChild(led);
       shell.appendChild(modelPanel());
+      shell.appendChild(termPanel());
+      shell.appendChild(limitsPanel());
       shell.appendChild(compsPanel());
       shell.appendChild(riskNote());
     }

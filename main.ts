@@ -16,6 +16,7 @@
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
@@ -53,7 +54,11 @@ if (issue !== null) {
 }
 
 mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
+// The strip's checksum is the sha256 of these exact board.json bytes,
+// computed here so the dashboard prints the build's own checksum.
+const boardJson = `${JSON.stringify({ rows: board })}\n`;
+radar.board_checksum = createHash('sha256').update(boardJson).digest('hex');
+writeFileSync(join(out, 'board.json'), boardJson);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
 
 /** Copy one directory's regular files into `to`, skipping names that start with a dot. */

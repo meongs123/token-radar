@@ -1,4 +1,4 @@
-// Token Radar — comps-calibrated implied-value model (radar-3).
+// Token Radar — comps-calibrated implied-value model (radar-6).
 //
 // One sealed snapshot of the protocol universe in, one ranked board out.
 // The board ranks EVERY rankable pre-token protocol in the snapshot (the
@@ -10,25 +10,29 @@
 // Bridge / Canonical Bridge / Liquid Staking / Liquid Restaking /
 // Restaked BTC / CEX category, no whole word wrapped, staked or staking
 // in the name, no exchange name at the start of the name, and no version
-// marker at the end. WBTC is Bitcoin on Ethereum, not a protocol still
+// marker at the end. A wrapped token on another chain is not a protocol still
 // waiting on a launch of its own. Live-token protocols are kept apart
 // and shown with the market's own value, never mixed into the ranking.
 //
 // Implied value is calibrated on the snapshot itself, not on a flat guess:
 // the market's own size curve is fitted on the live-token protocols in
 // the same snapshot — log10(market cap) on log10(TVL), ordinary least
-// squares over the 128 live protocols with a market cap above zero — so
-// a dollar of TVL is worth less at $5B than at $5M, the way the market
-// actually prices it. A flat mcap/TVL multiple has no size slope and
-// overprices the biggest protocols several times over: the flat model
-// priced Steakhouse Financial (TVL $2.75B) at $404M; the fitted curve
-// prices it at $180M. That is a systematic bias, not a rounding error,
-// and the curve is the fix. The fitted slope is read off this snapshot,
-// never copied from another entry's number: what is validated is our
-// model against the flat multiple, not our number against theirs.
+// squares over the 92 stand-alone live protocols with a market cap above
+// zero (the board's own exclusion rule, applied to the fit universe:
+// wrapped, bridged, staked and versioned products are excluded from the
+// fit, not hidden — all 128 live tokens still appear in the live-token
+// view with the market's own value) — so a dollar of TVL is worth less
+// at $5B than at $5M, the way the market actually prices it. A flat
+// mcap/TVL multiple has no size slope and overprices the biggest
+// protocols several times over: the flat model priced the largest row
+// (TVL $2.75B) at $404M; the fitted curve prices it at $110M.
+// That is a systematic bias, not a rounding error, and the curve is the
+// fix. The fitted slope is read off this snapshot, never copied from
+// another entry's number: what is validated is our model against the
+// flat multiple, not our number against theirs.
 //
 //   curve(tvl)       = 10^a * tvl^b            (a, b fitted on the snapshot;
-//                                              b sublinear, about 0.60 here)
+//                                              b sublinear, about 0.51 here)
 //   factor(category) = 10^(median residual off the curve in that category,
 //                          shrunk toward 1 by n/(n+3) when few live comps)
 //   growth           = clamp(change_7d, -60, 120) per cent
@@ -40,15 +44,28 @@
 //   implied          = max(1, round(curve(tvl) * factor(category)
 //                                  * growthMult * maturity * breadth))
 //
-// The fit is validated, not asserted: leave-one-out over the same 128
-// live tokens — each one predicted from a fit that never saw it — gives
-// a median miss of x3.74 with 42.2% of predictions within 3x of the
-// market cap, against x5.40 and 34.4% for the flat multiple on the same
-// protocol. Had the fitted curve lost to flat on either number, the
+// The fit is validated, not asserted: leave-one-out over the same 92
+// stand-alone tokens — each one predicted from a fit that never saw it —
+// gives a median miss of x3.27 with 44.6% of predictions within 3x of the
+// market cap, against x5.74 and 32.6% for the flat multiple on the same
+// protocol. A second held-out test, walk-forward by listing date, fits
+// on the older tokens and tests on the newer ones: x2.78 on the
+// older-half/newer-half split and x2.47 fitting on tokens listed 900+
+// days ago. Had the fitted curve lost to flat on either number, the
 // model would have stayed flat: a model that validates worse is not
 // shipped because its formula looks better. Ratios are winsorised to
 // [0.01, 5] before the fit, the same winsorisation the flat model used,
 // so a dead token at 0.00x or a 400x outlier cannot bend the slope.
+// The term table the dashboard prints carries both tests' numbers for
+// every step of the model and every term tried and dropped; a term that
+// wins one test but loses the other is not kept. One honest limit the
+// table shows: the size curve alone is the sharpest held-out mcap
+// predictor (LOO x3.11, walk-forward x2.45/x2.34) — the category factor
+// and the multipliers do not sharpen mcap prediction, and are kept
+// because they price the board's actual use, a category's traded level
+// and a launch's seasoning for rows with no mcap, not held-out mcap.
+// Leave-one-out cannot test the factor where it matters most: holding
+// out a category's only live comp removes the factor it tests.
 //
 // Slot #4 (lever (a)) audited this curve and kept it. The carried-over
 // multipliers were checked against the fitted residuals: growth, maturity
@@ -58,11 +75,25 @@
 // beats the curve on both LOO numbers. Two-piece hinges at nine
 // breakpoints, a quadratic, and per-category slopes (six settings) were
 // all tried on the same snapshot and all lose on LOO — except a hinge
-// above $1B TVL, nominally (x3.58, 43.8%), which fails honest validation:
-// its bootstrap intervals cover zero on both numbers, it wins on only
-// 76 of 128 tokens, and a split-half test never reproduces it. It is
-// selection noise from a nine-point grid, not a better curve, and was
-// not adopted. The line stays: intercept 2.3849, slope 0.6048.
+// above $1B TVL, nominally (x3.58, 43.8% on the 128-token fit), which
+// fails honest validation: its bootstrap intervals cover zero on both
+// numbers, it wins on only 76 of 128 tokens, and a split-half test never
+// reproduces it. It is selection noise from a nine-point grid, not a
+// better curve, and was not adopted.
+//
+// Slot #6 re-grounds the fit on the 92 stand-alone tokens and re-tests
+// every term with both held-out tests. The line is now: intercept
+// 3.0755, slope 0.5098. The 128-token fit (2.3849/0.6048, LOO x3.74,
+// walk-forward x3.46/x3.57) was tested and not kept: wrapped and bridged
+// products bend the slope. The $1B hinge re-tested on the 92 loses LOO
+// (x3.33, 43.5%), wins 42 of 92 tokens, its paired-bootstrap intervals
+// still cover zero, and it wins one walk-forward split only — still
+// selection noise. The printed band was too narrow before recalibration
+// (leave-one-out put 35.9% of tokens inside it, not the 50% a middle
+// band claims), so the band is widened by the factor the build computes
+// until held-out coverage reaches 50%, and the measured coverage is
+// printed next to the band. The band never feeds implied values: totals
+// and verdicts do not move with it.
 //
 // radar-4 adds what the detail view needs to defend the number: every
 // row carries the curve's value at its own TVL and the category factor
@@ -165,7 +196,7 @@ export const MODEL: ModelConstants = {
   comp_min_live: 3,
 };
 
-export const MODEL_VERSION = 'radar-5-farm';
+export const MODEL_VERSION = 'radar-6-c2';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -174,6 +205,16 @@ export const LIVE_ROWS = 24;
 export interface CompMember {
   name: string;
   ratio: number;
+}
+
+/** The 758-protocol ledger: every protocol in the snapshot in exactly one group. */
+export interface LedgerCounts {
+  total: number;
+  ranked: number;
+  /** Protocols that already trade, so they price the board instead of joining it. */
+  live_token: number;
+  /** Pre-token protocols set aside, by the rule that set them aside. */
+  set_aside: { bridge: number; liquid_staking: number; exchange: number; versioned: number; wrapped: number; kin: number };
 }
 
 /** One category's comp: the live market's own mcap/TVL multiple, and the fitted curve's factor for the category. */
@@ -309,9 +350,23 @@ export interface RadarData {
   size_curve: { intercept: number; slope: number; live_count: number };
   /** Leave-one-out validation of the fitted curve against the flat multiple, on the same snapshot. */
   validation: { fitted: LooScore; flat: LooScore };
+  /** Walk-forward validation of the shipped model: older tokens fit, newer tokens tested, on both splits. */
+  walk_forward: WalkForwardScores;
+  /** The term-by-term table: every step of the shipped model and every term tried and dropped, with both held-out tests' numbers. */
+  term_table: TermRow[];
+  /** The printed band's honesty, measured leave-one-out before and after the recalibration widening. */
+  band_honesty: BandHonesty;
+  /** The fit universe: how many live tokens the curve was fitted on, out of how many live tokens trade, and how many were excluded from the fit. */
+  fit_universe: { fitted_live: number; live_total: number; excluded_live: number };
   comps: CategoryComp[];
   rows: RadarRow[];
   live: LiveRow[];
+  /** The fitted tokens' own market caps against their TVLs — the scatter's fitted cloud, in snapshot order. */
+  fit_points: { tvl_usd: number; mcap_usd: number }[];
+  /** Every protocol in the snapshot in exactly one group: ranked, already-trades, or set aside with its reason. */
+  ledger: LedgerCounts;
+  /** sha256 of the board.json bytes main.ts wrote, so the strip's checksum is the build's own. Set by main.ts, not by the fit. */
+  board_checksum?: string;
 }
 
 /** Why the snapshot is not one this model can score. */
@@ -384,7 +439,7 @@ export function isRankable(p: SnapshotProtocol): boolean {
 // Bridge / Canonical Bridge / Liquid Staking / Liquid Restaking /
 // Restaked BTC / CEX category, no whole word wrapped, staked or staking
 // in the name, no exchange name at the start of the name, and no version
-// marker at the end. WBTC is Bitcoin on Ethereum, not a protocol still
+// marker at the end. A wrapped token on another chain is not a protocol still
 // waiting on a launch of its own. Live-token protocols are kept apart
 // and shown with the market's own value, never mixed into the ranking.
 //
@@ -410,7 +465,7 @@ export function isRankable(p: SnapshotProtocol): boolean {
 // biggest by market cap, with their own ratios), and every row carries
 // whether its multiple is its category's median or the global fallback —
 // 84 of the 198 rows fall back, most of all the Risk Curators at the top,
-// whose single live comp (Api3, 2.98x) is too thin to price a category.
+// whose single live comp (2.98x) is too thin to price a category.
 // The dashboard says so on the row, instead of printing a bare 0.17x.
 // Farm plans stay derived from the protocol's own record, and each row
 // now carries a one-line farm summary (capital, gas, hold, setup time)
@@ -488,11 +543,31 @@ export interface SizeCurve {
   /** The market-wide residual band, for categories too thin to set their own. */
   globalBand: { p25: number; p75: number; live_count: number };
   validation: { fitted: LooScore; flat: LooScore };
+  /** The factor the printed band is widened by around its centre (1 = the raw P25–P75 of residuals), set by the band calibration in buildRadar. Bands never feed implied values. */
+  band_widen: number;
 }
 
-/** The live-token protocols the curve is fitted on: a market cap above zero and a TVL above zero, in snapshot order so the sums accumulate the same way on every run. */
-function fitRows(snapshot: Snapshot): SnapshotProtocol[] {
+/** The live-token protocols the curve is fitted on: a market cap above zero and a TVL above zero, in snapshot order so the sums accumulate the same way on every run — and stand-alone, under the board's own exclusion rule (no wrapped/bridged/staked category, no version marker, no wrapped/staked word, no exchange prefix). The 36 excluded live tokens still appear in the live-token view with the market's own value; they are excluded from the fit, not hidden. */
+export function isStandaloneLive(p: SnapshotProtocol): boolean {
+  return (
+    p.mcap_usd !== null &&
+    p.mcap_usd > 0 &&
+    p.tvl_usd > 0 &&
+    p.category !== null &&
+    !WRAPPED_CATEGORIES.has(p.category) &&
+    !VERSIONED.test(p.name) &&
+    !WRAPPED_WORD.test(p.name) &&
+    !EXCHANGE_PREFIX.test(p.name)
+  );
+}
+
+/** Every live-token protocol, stand-alone or not: the fit universe the 92-fit was tested against and not kept. */
+export function allLiveRows(snapshot: Snapshot): SnapshotProtocol[] {
   return snapshot.protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0);
+}
+
+function fitRows(snapshot: Snapshot): SnapshotProtocol[] {
+  return snapshot.protocols.filter(isStandaloneLive);
 }
 
 /** Ordinary least squares for y = a + b*x. */
@@ -514,6 +589,34 @@ function ols(xs: number[], ys: number[]): { intercept: number; slope: number } {
   }
   const slope = sxx === 0 ? 0 : sxy / sxx;
   return { intercept: my - slope * mx, slope };
+}
+
+/** Ordinary least squares for y on several regressors (design rows already carry their own 1 for the intercept), by normal equations with Gaussian elimination. Used by the term-table variants that add one extra term to the size curve (hinge, quadratic, chain-count, age). Small and exact: at most three regressors. */
+function olsMulti(design: number[][], ys: number[]): number[] {
+  const k = design[0]!.length;
+  const a: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+  const b: number[] = new Array<number>(k).fill(0);
+  for (let i = 0; i < design.length; i++) {
+    const row = design[i]!;
+    for (let r = 0; r < k; r++) {
+      b[r]! += row[r]! * ys[i]!;
+      for (let c = 0; c < k; c++) a[r]![c]! += row[r]! * row[c]!;
+    }
+  }
+  for (let c = 0; c < k; c++) {
+    let piv = c;
+    for (let r = c + 1; r < k; r++) if (Math.abs(a[r]![c]!) > Math.abs(a[piv]![c]!)) piv = r;
+    [a[c], a[piv]] = [a[piv]!, a[c]!];
+    [b[c], b[piv]] = [b[piv]!, b[c]!];
+    if (Math.abs(a[c]![c]!) < 1e-12) continue;
+    for (let r = 0; r < k; r++) {
+      if (r === c) continue;
+      const f = a[r]![c]! / a[c]![c]!;
+      for (let cc = c; cc < k; cc++) a[r]![cc]! -= f * a[c]![cc]!;
+      b[r]! -= f * b[c]!;
+    }
+  }
+  return b.map((v, i) => (Math.abs(a[i]![i]!) < 1e-12 ? 0 : v / a[i]![i]!));
 }
 
 /** The winsorised log market cap one live protocol contributes to the fit: its TVL, times its mcap/TVL clamped to the model's own winsorisation. */
@@ -627,9 +730,13 @@ function leaveOneOut(snapshot: Snapshot, rows: SnapshotProtocol[], model: ModelC
   return { fitted: score(fittedMiss), flat: score(flatMiss) };
 }
 
-/** The size curve, fitted on the snapshot's own live-token protocols, with its leave-one-out validation against the flat multiple. */
+/** The size curve, fitted on the snapshot's own stand-alone live-token protocols (see fitRows), with its leave-one-out validation against the flat multiple. */
 export function fitSizeCurve(snapshot: Snapshot, model: ModelConstants = MODEL): SizeCurve {
-  const rows = fitRows(snapshot);
+  return fitSizeCurveOnRows(snapshot, fitRows(snapshot), model);
+}
+
+/** The size curve fitted on a given set of live-token rows — the 92 stand-alone rows for the shipped fit, all 128 live rows for the tested-and-not-kept fit-universe row of the term table. */
+export function fitSizeCurveOnRows(snapshot: Snapshot, rows: SnapshotProtocol[], model: ModelConstants = MODEL): SizeCurve {
   const { intercept, slope } = ols(
     rows.map((p) => Math.log10(p.tvl_usd)),
     rows.map((p) => fitY(p, model)),
@@ -650,7 +757,482 @@ export function fitSizeCurve(snapshot: Snapshot, model: ModelConstants = MODEL):
       const s = [...list].sort((a, b) => a - b);
       return { category, p25: quantile(s, 0.25), p75: quantile(s, 0.75), live_count: list.length };
     });
-  return { intercept, slope, live_count: rows.length, factors, bands, globalBand, validation: leaveOneOut(snapshot, rows, model) };
+  return { intercept, slope, live_count: rows.length, factors, bands, globalBand, validation: leaveOneOut(snapshot, rows, model), band_widen: 1 };
+}
+
+/** Widen a residual band around its centre by a factor in log10 space: the middle stays where the residuals put it, the half-width grows. At factor 1 the band is the raw P25–P75. */
+export function widenBand(p25: number, p75: number, factor: number): { p25: number; p75: number } {
+  const centre = (p25 + p75) / 2;
+  const half = (p75 - p25) / 2;
+  return { p25: centre - half * factor, p75: centre + half * factor };
+}
+
+// ---- Slot #6: term-by-term validation on two held-out tests ----
+
+/** One term-table row: both held-out tests' numbers for one step of the model or one tried-and-dropped term. */
+export interface TermRow {
+  term: string;
+  /** 'step' = a cumulative step of the shipped model, 'shipped' = the shipped model itself, 'dropped' = tried and not kept. */
+  kind: 'step' | 'shipped' | 'dropped';
+  loo: LooScore;
+  wf_half: LooScore;
+  wf_900: LooScore;
+  note: string;
+}
+
+/** Walk-forward scores for the shipped model: older tokens fit, newer tokens tested. */
+export interface WalkForwardScores {
+  half: LooScore;
+  days900: LooScore;
+}
+
+/** The printed band's honesty, measured leave-one-out on the fitted tokens. Shares, not percents. */
+export interface BandHonesty {
+  widen: number;
+  middle_before: number;
+  outer_before: number;
+  middle_measured: number;
+  outer_measured: number;
+  n: number;
+}
+
+/** A variant kind the term table can fit and score. 'slopeK' fits a slope per category, shrunk toward the global slope with weight n/(n+K). */
+export type VariantKind =
+  | 'flat'
+  | 'curve'
+  | 'curveFactor'
+  | 'shipped'
+  | 'hinge'
+  | 'quad'
+  | 'slope0'
+  | 'slope1'
+  | 'slope3'
+  | 'slope5'
+  | 'slope10'
+  | 'slope20'
+  | 'family'
+  | 'chainReg'
+  | 'ageReg'
+  | 'noGrowth'
+  | 'noMaturity'
+  | 'noBreadth';
+
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+/** Whether a protocol is a live-token protocol at all (trades, whatever its kind): the flat comps' universe. */
+function isLiveToken(p: SnapshotProtocol): boolean {
+  return p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0;
+}
+
+/** The multipliers a variant applies: all three, or all but the one named — the toggle rows are the shipped model minus one multiplier. */
+function variantMultipliers(p: SnapshotProtocol, asOf: string, model: ModelConstants, drop?: 'growth' | 'maturity' | 'breadth'): number {
+  const m = multipliers(p, asOf, model);
+  return (drop === 'growth' ? 1 : m.growthMult) * (drop === 'maturity' ? 1 : m.maturityMult) * (drop === 'breadth' ? 1 : m.breadthMult);
+}
+
+/** Per-category factors off a fitted log line: each category's median residual, shrunk toward 1 when the category has few live comps. */
+function factorsOffBase(rows: SnapshotProtocol[], baseLog: (p: SnapshotProtocol) => number, model: ModelConstants): Map<string, number> {
+  const by = new Map<string, number[]>();
+  for (const p of rows) {
+    const r = fitY(p, model) - baseLog(p);
+    const key = p.category ?? 'Other';
+    const list = by.get(key) ?? [];
+    list.push(r);
+    by.set(key, list);
+  }
+  const out = new Map<string, number>();
+  for (const [category, residuals] of by) {
+    out.set(category, 10 ** (median(residuals) * (residuals.length / (residuals.length + model.comp_min_live))));
+  }
+  return out;
+}
+
+/**
+ * One variant fitted on train rows: a function predicting a protocol's market cap.
+ * Line-based variants fit log10(mcap) on log10(TVL) plus at most one extra term, then take the
+ * category factor off the residuals — the shipped construction, with one piece changed at a time.
+ * 'flat' is the category-median multiple with the multipliers; 'slopeK' fits a slope per category
+ * (shrunk toward the global slope) and no separate factor; 'family' adds a first-word-of-category
+ * factor on top of the shipped model; 'chainReg'/'ageReg' replace the breadth/maturity multiplier
+ * with a fitted regressor on the same input.
+ */
+function fitVariant(
+  train: SnapshotProtocol[],
+  kind: VariantKind,
+  snapForComps: Snapshot,
+  model: ModelConstants,
+  asOf: string,
+): (p: SnapshotProtocol) => number {
+  if (kind === 'flat') {
+    const comps = categoryComps(snapForComps, model);
+    const table = new Map(comps.comps.map((c) => [c.category, c]));
+    return (p) => {
+      const row = table.get(p.category ?? 'Other');
+      const comp = row === undefined ? comps.global : row.median_multiple;
+      return p.tvl_usd * comp * variantMultipliers(p, asOf, model);
+    };
+  }
+  if (kind.startsWith('slope')) {
+    const k = Number(kind.slice(5));
+    const g = ols(
+      train.map((p) => Math.log10(p.tvl_usd)),
+      train.map((p) => fitY(p, model)),
+    );
+    const byCat = new Map<string, SnapshotProtocol[]>();
+    for (const p of train) {
+      const key = p.category ?? 'Other';
+      const list = byCat.get(key) ?? [];
+      list.push(p);
+      byCat.set(key, list);
+    }
+    const lines = new Map<string, { intercept: number; slope: number }>();
+    for (const [cat, ps] of byCat) {
+      if (ps.length < 2) {
+        lines.set(cat, g);
+        continue;
+      }
+      const c = ols(
+        ps.map((p) => Math.log10(p.tvl_usd)),
+        ps.map((p) => fitY(p, model)),
+      );
+      const w = k === 0 ? 1 : ps.length / (ps.length + k);
+      const slope = w * c.slope + (1 - w) * g.slope;
+      const mx = ps.reduce((s, p) => s + Math.log10(p.tvl_usd), 0) / ps.length;
+      const my = ps.reduce((s, p) => s + fitY(p, model), 0) / ps.length;
+      lines.set(cat, { intercept: my - slope * mx, slope });
+    }
+    return (p) => {
+      const line = lines.get(p.category ?? 'Other') ?? g;
+      return 10 ** (line.intercept + line.slope * Math.log10(p.tvl_usd)) * variantMultipliers(p, asOf, model);
+    };
+  }
+  const logTvl = (p: SnapshotProtocol): number => Math.log10(p.tvl_usd);
+  const log1b = Math.log10(1_000_000_000);
+  let design: (p: SnapshotProtocol) => number[];
+  if (kind === 'hinge') design = (p) => [1, logTvl(p), Math.max(0, logTvl(p) - log1b)];
+  else if (kind === 'quad') design = (p) => [1, logTvl(p), logTvl(p) * logTvl(p)];
+  else if (kind === 'chainReg') design = (p) => [1, logTvl(p), Math.min(Math.max(p.chains.length - 1, 0), model.breadth_max_extra)];
+  else if (kind === 'ageReg') {
+    design = (p) => {
+      const m = multipliers(p, asOf, model);
+      const age = m.age ?? model.unknown_age_days;
+      return [1, logTvl(p), Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days];
+    };
+  } else design = (p) => [1, logTvl(p)];
+  const beta = olsMulti(
+    train.map(design),
+    train.map((p) => fitY(p, model)),
+  );
+  const baseLog = (p: SnapshotProtocol): number => design(p).reduce((s, v, i) => s + v * beta[i]!, 0);
+  const fac = factorsOffBase(train, baseLog, model);
+  const fam = new Map<string, number>();
+  if (kind === 'family') {
+    const byFam = new Map<string, number[]>();
+    for (const p of train) {
+      const f = (p.category ?? 'Other').split(' ')[0]!;
+      const r = fitY(p, model) - baseLog(p) - Math.log10(fac.get(p.category ?? 'Other') ?? 1);
+      const list = byFam.get(f) ?? [];
+      list.push(r);
+      byFam.set(f, list);
+    }
+    for (const [f, residuals] of byFam) {
+      fam.set(f, 10 ** (median(residuals) * (residuals.length / (residuals.length + model.comp_min_live))));
+    }
+  }
+  return (p) => {
+    const base = 10 ** baseLog(p);
+    if (kind === 'curve') return base;
+    let v = base * (fac.get(p.category ?? 'Other') ?? 1);
+    if (kind === 'curveFactor') return v;
+    if (kind === 'family') v *= fam.get((p.category ?? 'Other').split(' ')[0]!) ?? 1;
+    if (kind === 'chainReg') return v * variantMultipliers(p, asOf, model, 'breadth');
+    if (kind === 'ageReg') return v * variantMultipliers(p, asOf, model, 'maturity');
+    if (kind === 'noGrowth') return v * variantMultipliers(p, asOf, model, 'growth');
+    if (kind === 'noMaturity') return v * variantMultipliers(p, asOf, model, 'maturity');
+    if (kind === 'noBreadth') return v * variantMultipliers(p, asOf, model, 'breadth');
+    return v * variantMultipliers(p, asOf, model);
+  };
+}
+
+/** One held-out score from a list of miss multiples: median miss and share within 3x. */
+function scoreMisses(misses: number[]): LooScore {
+  const within = misses.filter((x) => x <= 3).length;
+  return { median_miss: round2(median(misses)), within_3x: Math.round((within / misses.length) * 1000) / 1000, n: misses.length };
+}
+
+/** Leave-one-out for one variant: each row predicted from a fit on the rest. The flat variant's comps come from the full snapshot minus the held token, the same universe the shipped LOO uses. */
+function looVariant(rows: SnapshotProtocol[], kind: VariantKind, snapshot: Snapshot, model: ModelConstants): { score: LooScore; misses: number[] } {
+  const misses: number[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const held = rows[i]!;
+    const rest = rows.filter((_, j) => j !== i);
+    const reduced: Snapshot = { ...snapshot, protocols: snapshot.protocols.filter((p) => p.slug !== held.slug) };
+    const predict = fitVariant(rest, kind, reduced, model, snapshot.as_of);
+    const actual = held.mcap_usd ?? 0;
+    const pred = predict(held);
+    misses.push(Math.max(pred / actual, actual / pred));
+  }
+  return { score: scoreMisses(misses), misses };
+}
+
+/** One walk-forward split of the dated rows: 'half' fits the older half and tests the newer half (stable sort by listed_at, as the snapshot orders ties); '900' fits tokens listed 900+ days ago and tests the rest. */
+function walkForwardSplit(dated: SnapshotProtocol[], snapshot: Snapshot, kind: 'half' | '900'): { train: SnapshotProtocol[]; test: SnapshotProtocol[] } {
+  if (kind === 'half') {
+    const s = [...dated].sort((a, b) => ((a.listed_at ?? '') < (b.listed_at ?? '') ? -1 : 1));
+    const h = Math.floor(s.length / 2);
+    return { train: s.slice(0, h), test: s.slice(h) };
+  }
+  const asOf = Date.parse(`${snapshot.as_of}T00:00:00Z`);
+  const age = (p: SnapshotProtocol): number => (asOf - Date.parse(`${p.listed_at ?? snapshot.as_of}T00:00:00Z`)) / 86_400_000;
+  return { train: dated.filter((p) => age(p) >= 900), test: dated.filter((p) => age(p) < 900) };
+}
+
+/** Walk-forward for one variant: fit on the older tokens, test on the newer ones. Undated rows take no part in either side. */
+function wfVariant(rows: SnapshotProtocol[], kind: VariantKind, snapshot: Snapshot, model: ModelConstants, split: 'half' | '900'): LooScore {
+  const dated = rows.filter((p) => p.listed_at !== null);
+  const { train, test } = walkForwardSplit(dated, snapshot, split);
+  const trainSnap: Snapshot = { ...snapshot, protocols: [...train, ...snapshot.protocols.filter((p) => !isLiveToken(p))] };
+  const predict = fitVariant(train, kind, trainSnap, model, snapshot.as_of);
+  const misses = test.map((p) => {
+    const pred = predict(p);
+    const actual = p.mcap_usd ?? 0;
+    return Math.max(pred / actual, actual / pred);
+  });
+  return scoreMisses(misses);
+}
+
+/** A fixed-seed generator, so the bootstrap below is deterministic: same snapshot, same intervals, every run. */
+function seededRandom(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+/**
+ * Paired bootstrap over two variants' leave-one-out misses: resample the tokens, recompute the
+ * median-miss difference and the within-3x difference, and report the 95% intervals. A term whose
+ * intervals cover zero has no honest win on that number.
+ */
+function bootstrapDiff(
+  aMiss: number[],
+  bMiss: number[],
+  reps = 2000,
+): { medianLo: number; medianHi: number; withinLo: number; withinHi: number; coversZero: boolean } {
+  const n = aMiss.length;
+  const diffs = aMiss.map((a, i) => a - bMiss[i]!);
+  const withinDiffs = aMiss.map((a, i) => (a <= 3 ? 1 : 0) - (bMiss[i]! <= 3 ? 1 : 0));
+  const rnd = seededRandom(0xc21a);
+  const medBoots: number[] = [];
+  const withinBoots: number[] = [];
+  for (let r = 0; r < reps; r++) {
+    const idx = Array.from({ length: n }, () => Math.floor(rnd() * n));
+    medBoots.push(median(idx.map((i) => diffs[i]!)));
+    withinBoots.push(idx.reduce((s, i) => s + withinDiffs[i]!, 0) / n);
+  }
+  medBoots.sort((a, b) => a - b);
+  withinBoots.sort((a, b) => a - b);
+  const lo = Math.floor(reps * 0.025);
+  const hi = Math.floor(reps * 0.975);
+  const medianLo = medBoots[lo]!;
+  const medianHi = medBoots[hi]!;
+  const withinLo = withinBoots[lo]!;
+  const withinHi = withinBoots[hi]!;
+  return { medianLo, medianHi, withinLo, withinHi, coversZero: medianLo <= 0 && medianHi >= 0 && withinLo <= 0 && withinHi >= 0 };
+}
+
+/** One token's leave-one-out band edges in log10 space, with the point prediction the band is expanded to contain. */
+interface LooBandEdge {
+  actual: number;
+  point: number;
+  curve: number;
+  mults: number;
+  mid: [number, number];
+  out: [number, number];
+}
+
+/** The leave-one-out band edges on the fitted rows: each token's band comes from a fit that never saw it, exactly as the honesty check the dossier ran. */
+function looBandEdges(rows: SnapshotProtocol[], snapshot: Snapshot, model: ModelConstants): LooBandEdge[] {
+  const edges: LooBandEdge[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const held = rows[i]!;
+    const rest = rows.filter((_, j) => j !== i);
+    const { intercept, slope } = ols(
+      rest.map((p) => Math.log10(p.tvl_usd)),
+      rest.map((p) => fitY(p, model)),
+    );
+    const resByCat = new Map<string, number[]>();
+    const resGlobal: number[] = [];
+    for (const p of rest) {
+      const r = fitY(p, model) - (intercept + slope * Math.log10(p.tvl_usd));
+      const key = p.category ?? 'Other';
+      const list = resByCat.get(key) ?? [];
+      list.push(r);
+      resByCat.set(key, list);
+      resGlobal.push(r);
+    }
+    const catRes = resByCat.get(held.category ?? 'Other') ?? [];
+    const useGlobal = catRes.length < model.comp_min_live;
+    const bandRes = [...(useGlobal ? resGlobal : catRes)].sort((a, b) => a - b);
+    const m = multipliers(held, snapshot.as_of, model);
+    const mults = m.growthMult * m.maturityMult * m.breadthMult;
+    const curve = 10 ** intercept * held.tvl_usd ** slope;
+    const facRes = catRes.length > 0 ? median(catRes) * (catRes.length / (catRes.length + model.comp_min_live)) : 0;
+    const point = curve * 10 ** facRes * mults;
+    edges.push({
+      actual: held.mcap_usd ?? 0,
+      point,
+      curve,
+      mults,
+      mid: [quantile(bandRes, 0.25), quantile(bandRes, 0.75)],
+      out: [quantile(bandRes, 0.1), quantile(bandRes, 0.9)],
+    });
+  }
+  return edges;
+}
+
+/** Held-out coverage of the widened band: the share of fitted tokens whose market cap lands inside the middle band and inside the outer band. */
+function bandCoverageAt(edges: LooBandEdge[], widen: number): { middle: number; outer: number } {
+  let mid = 0;
+  let out = 0;
+  for (const e of edges) {
+    const midW = widenBand(e.mid[0], e.mid[1], widen);
+    let low = Math.max(1, e.curve * 10 ** midW.p25 * e.mults);
+    let high = Math.max(1, e.curve * 10 ** midW.p75 * e.mults);
+    low = Math.min(low, e.point);
+    high = Math.max(high, e.point);
+    if (e.actual >= low && e.actual <= high) mid++;
+    const outW = widenBand(e.out[0], e.out[1], widen);
+    let low90 = Math.max(1, e.curve * 10 ** outW.p25 * e.mults);
+    let high90 = Math.max(1, e.curve * 10 ** outW.p75 * e.mults);
+    low90 = Math.min(low90, e.point);
+    high90 = Math.max(high90, e.point);
+    if (e.actual >= low90 && e.actual <= high90) out++;
+  }
+  return { middle: round3(mid / edges.length), outer: round3(out / edges.length) };
+}
+
+/**
+ * Band recalibration: the raw P25–P75 band holds too few held-out tokens (35.9% on the 92), so widen
+ * it by the smallest factor, in 0.01 steps up to 3.00, whose leave-one-out middle coverage reaches
+ * 50% — the field's middle band holds 45–60%. The measured coverages, before and after, are
+ * printed next to the band; the widened band never feeds implied values.
+ */
+export function calibrateBand(rows: SnapshotProtocol[], snapshot: Snapshot, model: ModelConstants = MODEL): BandHonesty {
+  const edges = looBandEdges(rows, snapshot, model);
+  const before = bandCoverageAt(edges, 1);
+  let widen = 1;
+  for (let h = 101; h <= 300; h++) {
+    const w = h / 100;
+    if (bandCoverageAt(edges, w).middle >= 0.5) {
+      widen = w;
+      break;
+    }
+    widen = w;
+  }
+  const measured = bandCoverageAt(edges, widen);
+  return { widen: round2(widen), middle_before: before.middle, outer_before: before.outer, middle_measured: measured.middle, outer_measured: measured.outer, n: rows.length };
+}
+
+/** How one variant's headline medians compare with the shipped model's, on the two held-out tests. */
+function variantVerdict(
+  r: { loo: LooScore; wf_half: LooScore; wf_900: LooScore },
+  shipped: { loo: LooScore; wf_half: LooScore; wf_900: LooScore },
+): string {
+  const looWin = r.loo.median_miss < shipped.loo.median_miss;
+  const halfWin = r.wf_half.median_miss < shipped.wf_half.median_miss;
+  const d900Win = r.wf_900.median_miss < shipped.wf_900.median_miss;
+  if (looWin && halfWin && d900Win) return 'wins both held-out tests';
+  if (looWin && !halfWin && !d900Win) return 'wins leave-one-out only';
+  if (!looWin && halfWin && d900Win) return 'wins walk-forward only';
+  if (!looWin && halfWin !== d900Win) return 'wins one walk-forward split only';
+  if (looWin && halfWin !== d900Win) return 'wins leave-one-out and one walk-forward split';
+  return 'wins neither held-out test';
+}
+
+/**
+ * The term-by-term table: every step of the shipped model and every term tried and dropped, each
+ * with both held-out tests' numbers (leave-one-out and both walk-forward splits). The shipped
+ * model is the curve on the 92 stand-alone tokens plus the category factor plus the three
+ * multipliers; nothing here is a number from another entry — every figure is recomputed from
+ * this snapshot by the variants above.
+ */
+export function buildTermTable(snapshot: Snapshot, model: ModelConstants = MODEL): TermRow[] {
+  const rows92 = fitRows(snapshot);
+  const rows128 = allLiveRows(snapshot);
+  const run = (rows: SnapshotProtocol[], kind: VariantKind): { loo: LooScore; wf_half: LooScore; wf_900: LooScore } => ({
+    loo: looVariant(rows, kind, snapshot, model).score,
+    wf_half: wfVariant(rows, kind, snapshot, model, 'half'),
+    wf_900: wfVariant(rows, kind, snapshot, model, '900'),
+  });
+  const shippedLoo = looVariant(rows92, 'shipped', snapshot, model);
+  const shipped: { loo: LooScore; wf_half: LooScore; wf_900: LooScore } = {
+    loo: shippedLoo.score,
+    wf_half: wfVariant(rows92, 'shipped', snapshot, model, 'half'),
+    wf_900: wfVariant(rows92, 'shipped', snapshot, model, '900'),
+  };
+  const hingeLoo = looVariant(rows92, 'hinge', snapshot, model);
+  const hingeWins = hingeLoo.misses.filter((m, i) => m < shippedLoo.misses[i]!).length;
+  const hingeBoot = bootstrapDiff(hingeLoo.misses, shippedLoo.misses);
+  const hinge = run(rows92, 'hinge');
+  const slopeKinds: VariantKind[] = ['slope0', 'slope1', 'slope3', 'slope5', 'slope10', 'slope20'];
+  const slopeRuns = slopeKinds.map((kind) => ({ kind, ...run(rows92, kind) }));
+  const bestSlope = slopeRuns.reduce((a, b) => (b.loo.median_miss < a.loo.median_miss ? b : a));
+  const slopeBeats = slopeRuns.some(
+    (r) => r.loo.median_miss < shipped.loo.median_miss && r.wf_half.median_miss < shipped.wf_half.median_miss && r.wf_900.median_miss < shipped.wf_900.median_miss,
+  );
+  const fit128 = fitSizeCurveOnRows(snapshot, rows128, model);
+  const fit92 = fitSizeCurve(snapshot, model);
+  const quad = run(rows92, 'quad');
+  const family = run(rows92, 'family');
+  const chainReg = run(rows92, 'chainReg');
+  const ageReg = run(rows92, 'ageReg');
+  const table: TermRow[] = [
+    { term: 'Flat multiple', kind: 'step', ...run(rows92, 'flat'), note: 'Category median mcap/TVL, the baseline the curve beat.' },
+    { term: 'Size curve', kind: 'step', ...run(rows92, 'curve'), note: 'Log-log curve alone — the sharpest held-out mcap predictor.' },
+    { term: '+ category factor', kind: 'step', ...run(rows92, 'curveFactor'), note: 'Adds the category factor (median residual off the curve, shrunk n/(n+3)).' },
+    { term: '+ growth, maturity, breadth', kind: 'shipped', ...shipped, note: 'The shipped model: curve x factor x growth x maturity x breadth.' },
+    {
+      term: 'Hinge above $1B TVL',
+      kind: 'dropped',
+      ...hinge,
+      note: `Wins ${hingeWins}/${rows92.length} leave-one-out tokens; paired-bootstrap 95% CI ${hingeBoot.coversZero ? 'covers' : 'does not cover'} 0 on both numbers; ${variantVerdict(hinge, shipped)} — selection noise.`,
+    },
+    { term: 'Quadratic curve', kind: 'dropped', ...quad, note: `Quadratic term on log TVL; ${variantVerdict(quad, shipped)} — not kept.` },
+    {
+      term: 'Per-category slopes',
+      kind: 'dropped',
+      loo: bestSlope.loo,
+      wf_half: bestSlope.wf_half,
+      wf_900: bestSlope.wf_900,
+      note: `Best of 6 shrinkage settings on LOO (k=${bestSlope.kind.slice(5)}); ${slopeBeats ? 'one setting beats the shipped model on both tests' : 'no setting beats the shipped model on both tests'}.`,
+    },
+    {
+      term: '128-token fit universe',
+      kind: 'dropped',
+      ...run(rows128, 'shipped'),
+      note: `Tested, not kept: wrapped and bridged products bend the slope (${fit128.slope.toFixed(2)} vs ${fit92.slope.toFixed(2)}).`,
+    },
+    { term: 'Family factor', kind: 'dropped', ...family, note: `First word of the category as an extra factor; ${variantVerdict(family, shipped)}.` },
+    { term: 'Chain count as regressor', kind: 'dropped', ...chainReg, note: `Chain count as a fitted regressor instead of the fixed breadth step; ${variantVerdict(chainReg, shipped)}.` },
+    { term: 'Age as regressor', kind: 'dropped', ...ageReg, note: `Age as a fitted regressor instead of the maturity step; ${variantVerdict(ageReg, shipped)}.` },
+  ];
+  for (const t of [
+    { term: 'No growth multiplier', kind: 'noGrowth' as VariantKind, label: 'growth' },
+    { term: 'No maturity multiplier', kind: 'noMaturity' as VariantKind, label: 'maturity' },
+    { term: 'No breadth multiplier', kind: 'noBreadth' as VariantKind, label: 'breadth' },
+  ]) {
+    const r = run(rows92, t.kind);
+    table.push({ term: t.term, kind: 'dropped', ...r, note: `Removing ${t.label}: ${variantVerdict(r, shipped)}.` });
+  }
+  return table;
+}
+
+/** Walk-forward scores for the shipped model, from the term table's own shipped row. */
+export function walkForwardFromTable(table: TermRow[]): WalkForwardScores {
+  const shipped = table.find((r) => r.kind === 'shipped') ?? table[0]!;
+  return { half: shipped.wf_half, days900: shipped.wf_900 };
 }
 
 /** The fitted curve's value for one TVL, before the category factor and the multipliers. */
@@ -666,18 +1248,23 @@ function factorFor(category: string | null, curve: SizeCurve): { factor: number;
   return { factor: row.factor, liveCount: row.live_count };
 }
 
-/** The residual band for a category: its own middle half when it has enough live comps, else the market-wide spread. Degenerate (no live comps anywhere) returns a zero-width band, so the caller still expands it to the point. */
+/** The residual band for a category: its own middle half when it has enough live comps, else the market-wide spread — widened by the fit's calibrated band factor around its centre, so the printed band's held-out coverage matches what the page claims. Degenerate (no live comps anywhere) returns a zero-width band, so the caller still expands it to the point. */
 function bandFor(
   category: string | null,
   fit: SizeCurve,
   minLive: number,
 ): { p25: number; p75: number; usedGlobal: boolean } {
+  const widen = Number.isFinite(fit.band_widen) && fit.band_widen > 0 ? fit.band_widen : 1;
   if (category !== null) {
     const b = fit.bands.find((x) => x.category === category);
-    if (b !== undefined && b.live_count >= minLive) return { p25: b.p25, p75: b.p75, usedGlobal: false };
+    if (b !== undefined && b.live_count >= minLive) {
+      const w = widenBand(b.p25, b.p75, widen);
+      return { p25: w.p25, p75: w.p75, usedGlobal: false };
+    }
   }
   if (!Number.isFinite(fit.globalBand.p25) || !Number.isFinite(fit.globalBand.p75)) return { p25: 0, p75: 0, usedGlobal: true };
-  return { p25: fit.globalBand.p25, p75: fit.globalBand.p75, usedGlobal: true };
+  const w = widenBand(fit.globalBand.p25, fit.globalBand.p75, widen);
+  return { p25: w.p25, p75: w.p75, usedGlobal: true };
 }
 
 /** The multipliers and the implied value one protocol gets under the fitted curve and the comps table. */
@@ -1128,6 +1715,26 @@ export function farmSummary(p: SnapshotProtocol, age: number | null, implied?: n
   };
 }
 
+/** The 758-protocol ledger, counted off the snapshot with the board's own exclusion rule: ranked, already-trades, and set aside by first-matching reason (bridge, liquid-staking, exchange, versioned, wrapped, then kin for anything left — a pre-token protocol with no category). */
+export function ledgerCounts(snapshot: Snapshot, ranked: number): LedgerCounts {
+  const setAside = { bridge: 0, liquid_staking: 0, exchange: 0, versioned: 0, wrapped: 0, kin: 0 };
+  let liveToken = 0;
+  for (const p of snapshot.protocols) {
+    if (!isPreToken(p)) {
+      liveToken++;
+      continue;
+    }
+    if (isRankable(p)) continue;
+    if (p.category === 'Bridge' || p.category === 'Canonical Bridge') setAside.bridge++;
+    else if (p.category === 'Liquid Staking' || p.category === 'Liquid Restaking' || p.category === 'Restaked BTC') setAside.liquid_staking++;
+    else if (p.category === 'CEX' || EXCHANGE_PREFIX.test(p.name)) setAside.exchange++;
+    else if (VERSIONED.test(p.name)) setAside.versioned++;
+    else if (WRAPPED_WORD.test(p.name)) setAside.wrapped++;
+    else setAside.kin++;
+  }
+  return { total: snapshot.protocols.length, ranked, live_token: liveToken, set_aside: setAside };
+}
+
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
 export function liveRows(snapshot: Snapshot): LiveRow[] {
   return snapshot.protocols
@@ -1157,12 +1764,14 @@ export function radarRow(
   const compRow = row.category === null ? undefined : table.get(row.category);
   // The range the row spans: the middle half of its category's live
   // comps around the fitted curve (25th–75th percentile of their
-  // residuals off the curve), so the band is the model's own
-  // uncertainty — the same curve and multipliers as the point, not a
-  // second model. Categories too thin to set their own band use the
-  // whole market's spread, so every row has a range. The band is then
-  // expanded to contain the point, so containment holds by
-  // construction: the point always sits inside its own range.
+  // residuals off the curve), widened by the fit's calibrated band
+  // factor so the printed band's held-out coverage matches what the
+  // page claims — so the band is the model's own uncertainty, the same
+  // curve and multipliers as the point, not a second model. Categories
+  // too thin to set their own band use the whole market's spread, so
+  // every row has a range. The band is then expanded to contain the
+  // point, so containment holds by construction: the point always sits
+  // inside its own range. The band never feeds implied values.
   const band = bandFor(row.category, fit, model.comp_min_live);
   const mults = row.model.growth_multiplier * row.model.maturity_multiplier * row.model.breadth_multiplier;
   const base = Math.max(1, row.model.curve_usd);
@@ -1211,6 +1820,13 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const comps = categoryComps(snapshot, model);
   const pricing = { fit, comps };
   const board = buildBoard(snapshot, model, pricing);
+  // The term table and the band calibration are computed from the same snapshot before the rows
+  // are rendered: the widening applies to the printed bands only, never to implied values, so
+  // totals and verdicts cannot move with it.
+  const term_table = buildTermTable(snapshot, model);
+  const band_honesty = calibrateBand(fitRows(snapshot), snapshot, model);
+  fit.band_widen = band_honesty.widen;
+  const liveTotal = allLiveRows(snapshot).length;
   const live = liveRows(snapshot);
   // The comps table carries the fitted factor beside the flat median, so
   // the dashboard can show both the curve's adjustment and the baseline
@@ -1246,9 +1862,16 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     farm: FARM,
     size_curve: { intercept: fit.intercept, slope: fit.slope, live_count: fit.live_count },
     validation: fit.validation,
+    walk_forward: walkForwardFromTable(term_table),
+    term_table,
+    band_honesty,
+    fit_universe: { fitted_live: fit.live_count, live_total: liveTotal, excluded_live: liveTotal - fit.live_count },
     comps: compsWithFactors.comps,
     rows: board.map((r) => radarRow(r, watch, compsWithFactors, fit, model)),
     live,
+    // The scatter's fitted cloud: the same rows fitSizeCurve fits, in snapshot order.
+    fit_points: fitRows(snapshot).map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd ?? 0 })),
+    ledger: ledgerCounts(snapshot, board.length),
   };
   return { board, radar };
 }
