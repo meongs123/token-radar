@@ -1,4 +1,3 @@
-// Token Radar dashboard: reads window.RADAR and renders the board. No network.
 (function () {
   'use strict';
 
@@ -40,7 +39,6 @@
     return Math.max(1, Math.round(curve * growthMult * maturity * breadth));
   }
 
-  // The verdict under the board's rule (DATA.verdict_rule): mirrors verdictFor in lib/model.ts.
   function verdictOf(slice, gas, forgone, net, netPerHour) {
     var r = DATA.verdict_rule || { kind: 'net_positive' };
     if (r.kind === 'net_per_hour') return netPerHour >= r.threshold_usd ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP';
@@ -158,7 +156,7 @@
       { text: 'Use a fresh wallet holding only the funds you plan to farm, funded from an exchange, seed phrase offline — never farm from the wallet holding your savings.', cost: 'about ' + fmtGas(DATA.farm.gas_funding_txs * txGas) + ' of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and ' + gas, time: '15 minutes to set up' },
       { text: secondActionFor(p, capital, chain), cost: 'about ' + fmtGas(DATA.farm.gas_weekly_txs * txGas) + ' of gas a week', time: '10 minutes a week' },
-      { text: 'Hold the position at least ' + hold + ' days so the activity spans more than one snapshot; do the weekly action on the same day each week.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
+      { text: 'Hold the position at least ' + hold + ' days so the activity spans more than one snapshot; do the weekly action on the same day each week. Abandon the farm if TVL falls below half its starting value or no points program appears within ' + hold + ' days.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Before you withdraw, search the protocol name plus 'points' on the official domain only, and check whether your wallet qualifies.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
       { text: "If a token ever launches, claim only from the protocol's own published link and verify the contract twice; never sign a blind approval.", cost: 'gas only, never a claim fee', time: '10 minutes at claim time' },
       { text: 'Log the wallet, the dates and every transaction, then revoke approvals you no longer need on the chain\'s token-approval page.', cost: 'nothing but the log', time: '5 minutes' }
@@ -537,7 +535,7 @@
     });
     return el('section', { class: 'panel' },
       el('h2', { text: 'What was tried, and what won' }),
-      el('p', { class: 'sub', text: 'Every term below was scored on two held-out tests: leave-one-out and walk-forward by listing date (older fit, newer tested). A term that wins one test but loses the other is not kept; no dropped term beats the shipped model on both. The shipped model is the curve with growth, maturity and breadth — no category factor: fitted and dropped, losing on all three tests. The remodel beats the curve alone on all three tests.' }),
+      el('p', { class: 'sub', text: 'Every term below was scored on two held-out tests: leave-one-out and walk-forward by listing date (older fit, newer tested). A term that wins one test but loses the other is not kept; no dropped term beats the shipped model on both tests by a margin the paired bootstrap confirms: the $1B hinge wins on medians, but its bootstrap interval covers zero. The shipped model is the curve with growth, maturity and breadth — no category factor: fitted and dropped, losing on all three tests. The remodel beats the curve alone on all three tests.' }),
       el('div', { class: 'table-wrap' },
         el('table', null,
           el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Term' }), el('th', { scope: 'col', text: 'Leave-one-out' }), el('th', { scope: 'col', text: 'WF older half → newer' }), el('th', { scope: 'col', text: 'WF 900d+ → newer' }), el('th', { scope: 'col', text: 'Verdict' }))),

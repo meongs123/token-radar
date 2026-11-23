@@ -109,10 +109,10 @@
 // shrunk n/(n+3)) loses on all three held-out tests: curve alone LOO
 // x3.11, walk-forward x2.45/x2.34; curve plus factor LOO x3.86,
 // walk-forward x2.57/x2.34; curve plus multipliers without the factor
-// LOO x2.98, walk-forward x2.43/x2.27 — the best variant on all three
+// LOO x2.98, walk-forward x2.43/x2.27 — the best variant under the both-tests rule on all three
 // tests, and the only one that puts the top three rows inside the
 // field's cover range with the lowest total ($1.61B; shipped $1.90B).
-// The Risk Curators 1.64x (n=1, Api3) factor disappears entirely,
+// The (n=1, Api3) factor disappears entirely,
 // including its line in the detail build-up. The remodel's board is
 // mostly size-ordered (Spearman 0.960 against TVL), stated as a
 // limitation rather than hidden. The verdict rule is re-specified on
@@ -346,7 +346,7 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** The verdict rule a ticket is struck under. 'net_positive' is the shipped Slot #6 rule (FARM when net > 0); 'net_per_hour' is a $/h floor on the ticket's net; 'breakeven_odds' is nightshift's rule — the odds a launch must have to repay the ticket's costs, (gas + forgone) / slice. */
+/** The verdict rule a ticket is struck under. 'net_positive' is the shipped Slot #6 rule (FARM when net > 0); 'net_per_hour' is a $/h floor on the ticket's net; 'breakeven_odds' is the break-even-odds rule — the odds a launch must have to repay the ticket's costs, (gas + forgone) / slice. */
 export type VerdictRule =
   | { kind: 'net_positive' }
   | { kind: 'net_per_hour'; threshold_usd: number }
