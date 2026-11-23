@@ -25,7 +25,8 @@
 // at $5B than at $5M, the way the market actually prices it. A flat
 // mcap/TVL multiple has no size slope and overprices the biggest
 // protocols several times over: the flat model priced the largest row
-// (TVL $2.75B) at $404M; the fitted curve prices it at $110M.
+// (TVL $2.75B) at $465M; the fitted curve prices it at $77M, and the
+// remodel at $67M.
 // That is a systematic bias, not a rounding error, and the curve is the
 // fix. The fitted slope is read off this snapshot, never copied from
 // another entry's number: what is validated is our model against the
@@ -33,24 +34,29 @@
 //
 //   curve(tvl)       = 10^a * tvl^b            (a, b fitted on the snapshot;
 //                                              b sublinear, about 0.51 here)
-//   factor(category) = 10^(median residual off the curve in that category,
-//                          shrunk toward 1 by n/(n+3) when few live comps)
 //   growth           = clamp(change_7d, -60, 120) per cent
 //   growthMult       = 1 + (growth / 100) * 0.5
 //   maturity         = 0.6 + min(age_days, 1095) / 1095 * 0.4
 //                      (age = days since first listed with no token;
 //                       unknown age counts as 365 days)
 //   breadth          = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
-//   implied          = max(1, round(curve(tvl) * factor(category)
+//   implied          = max(1, round(curve(tvl)
 //                                  * growthMult * maturity * breadth))
+//
+// No category factor: the factor was fitted, tested on both held-out
+// tests, and dropped in Slot #7 (see below) — it loses on all three
+// tests, so the curve prices every row without a category adjustment.
+// The flat category median is kept beside the curve as the baseline
+// the curve beat, and the comps table still names the live protocols
+// behind each category.
 //
 // The fit is validated, not asserted: leave-one-out over the same 92
 // stand-alone tokens — each one predicted from a fit that never saw it —
-// gives a median miss of x3.27 with 44.6% of predictions within 3x of the
+// gives a median miss of x2.98 with 50.0% of predictions within 3x of the
 // market cap, against x5.74 and 32.6% for the flat multiple on the same
 // protocol. A second held-out test, walk-forward by listing date, fits
-// on the older tokens and tests on the newer ones: x2.78 on the
-// older-half/newer-half split and x2.47 fitting on tokens listed 900+
+// on the older tokens and tests on the newer ones: x2.43 on the
+// older-half/newer-half split and x2.27 fitting on tokens listed 900+
 // days ago. Had the fitted curve lost to flat on either number, the
 // model would have stayed flat: a model that validates worse is not
 // shipped because its formula looks better. Ratios are winsorised to
@@ -58,14 +64,17 @@
 // so a dead token at 0.00x or a 400x outlier cannot bend the slope.
 // The term table the dashboard prints carries both tests' numbers for
 // every step of the model and every term tried and dropped; a term that
-// wins one test but loses the other is not kept. One honest limit the
-// table shows: the size curve alone is the sharpest held-out mcap
-// predictor (LOO x3.11, walk-forward x2.45/x2.34) — the category factor
-// and the multipliers do not sharpen mcap prediction, and are kept
-// because they price the board's actual use, a category's traded level
-// and a launch's seasoning for rows with no mcap, not held-out mcap.
-// Leave-one-out cannot test the factor where it matters most: holding
-// out a category's only live comp removes the factor it tests.
+// wins one test but loses the other is not kept. The table's decisive
+// rows: the size curve alone (LOO x3.11, walk-forward x2.45/x2.34),
+// the curve plus the category factor (LOO x3.86, walk-forward
+// x2.57/x2.34), and the shipped remodel (LOO x2.98, walk-forward
+// x2.43/x2.27). The factor loses on all three tests — adding it to the
+// curve costs LOO x3.11 to x3.86, adding it to curve plus multipliers
+// costs x2.98 to x3.27 — so it was dropped, not kept. The multipliers
+// price the board's actual use, a launch's seasoning for rows with no
+// mcap, not held-out mcap: the curve alone is the sharpest held-out
+// mcap predictor of the two-piece models, and the remodel beats it on
+// all three tests once the multipliers are added without the factor.
 //
 // Slot #4 (lever (a)) audited this curve and kept it. The carried-over
 // multipliers were checked against the fitted residuals: growth, maturity
@@ -90,26 +99,43 @@
 // still cover zero, and it wins one walk-forward split only — still
 // selection noise. The printed band was too narrow before recalibration
 // (leave-one-out put 35.9% of tokens inside it, not the 50% a middle
-// band claims), so the band is widened by the factor the build computes
+// band claims), so the band is widened by the widening the build computes
 // until held-out coverage reaches 50%, and the measured coverage is
 // printed next to the band. The band never feeds implied values: totals
 // and verdicts do not move with it.
 //
+// Slot #7 drops the category factor and re-specifies the verdict rule
+// on the remodelled board. The factor (median residual off the curve,
+// shrunk n/(n+3)) loses on all three held-out tests: curve alone LOO
+// x3.11, walk-forward x2.45/x2.34; curve plus factor LOO x3.86,
+// walk-forward x2.57/x2.34; curve plus multipliers without the factor
+// LOO x2.98, walk-forward x2.43/x2.27 — the best variant on all three
+// tests, and the only one that puts the top three rows inside the
+// field's cover range with the lowest total ($1.61B; shipped $1.90B).
+// The Risk Curators 1.64x (n=1, Api3) factor disappears entirely,
+// including its line in the detail build-up. The remodel's board is
+// mostly size-ordered (Spearman 0.960 against TVL), stated as a
+// limitation rather than hidden. The verdict rule is re-specified on
+// the new board by the decision rule in VERDICT_RULE below: the
+// break-even-odds rule was computed first (FARM 6, below the field
+// floor of 10) and did not yield a viable bucket; $25/h leaves a
+// 5-row FARM bucket; net > 0 is the defect. $10/h is adopted by
+// elimination as a labelled judgement call — never "the honest middle",
+// never field-supported. Under it the board reads 37/56/105, ROBUST
+// and the farm book recomputed for that pair only (see buildRadar).
+//
 // radar-4 adds what the detail view needs to defend the number: every
-// row carries the curve's value at its own TVL and the category factor
-// that adjusted it, and the range the row spans across the middle half
-// of its category's live comps — the 25th to 75th percentile of their
-// residuals off the curve, so the point always sits inside its own
-// range. Categories too thin to set their own band use the whole
-// market's spread, so every row carries a range, and the dashboard says
-// so on the row. Categories with fewer than 3 live comps get a factor shrunk
-// toward 1.00x, and the dashboard says so on the row, instead of
-// printing a bare multiple. The flat category median is kept beside the
-// curve as the baseline the curve beat, and the comps table still names
-// the live protocols behind each category. Farm plans stay derived from
-// the protocol's own record, and each row still carries a one-line farm
-// summary (capital, gas, hold, setup time) so a reader can size the
-// whole plan before reading its seven steps.
+// row carries the curve's value at its own TVL and the range the row
+// spans across the middle half of its category's live comps — the 25th
+// to 75th percentile of their residuals off the curve, so the point
+// always sits inside its own range. Categories too thin to set their
+// own band use the whole market's spread, so every row carries a range,
+// and the dashboard says so on the row. The flat category median is
+// kept beside the curve as the baseline the curve beat, and the comps
+// table still names the live protocols behind each category. Farm plans
+// stay derived from the protocol's own record, and each row still
+// carries a one-line farm summary (capital, gas, hold, setup time) so
+// a reader can size the whole plan before reading its seven steps.
 //
 // Slot #5 (lever (b)) prices the farm ticket per protocol, not per
 // board: gas is priced on the FIRST chain the protocol itself lists
@@ -196,7 +222,7 @@ export const MODEL: ModelConstants = {
   comp_min_live: 3,
 };
 
-export const MODEL_VERSION = 'radar-6-c2';
+export const MODEL_VERSION = 'radar-7-c2';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -217,14 +243,12 @@ export interface LedgerCounts {
   set_aside: { bridge: number; liquid_staking: number; exchange: number; versioned: number; wrapped: number; kin: number };
 }
 
-/** One category's comp: the live market's own mcap/TVL multiple, and the fitted curve's factor for the category. */
+/** One category's comp: the live market's own mcap/TVL multiple (the flat baseline the curve beat), with the live protocols that set it named. */
 export interface CategoryComp {
   category: string;
   live_count: number;
   median_multiple: number;
   used_global: boolean;
-  /** The fitted curve's factor for this category (1 when no live-token protocol in the category records a market cap). */
-  curve_factor: number;
   /** The five biggest live-token protocols in the category, by market cap, with their own ratios. */
   members: CompMember[];
 }
@@ -256,10 +280,8 @@ export interface BoardRow {
     comp_category: string;
     comp_multiple: number;
     comp_live_count: number;
-    /** The fitted curve's value at this row's TVL, before the category factor. */
+    /** The fitted curve's value at this row's TVL, before the multipliers. */
     curve_usd: number;
-    /** The category factor that adjusted the curve for this row. */
-    category_factor: number;
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
@@ -301,12 +323,8 @@ export interface RadarRow {
   comp_multiple: number;
   comp_live_count: number;
   comp_used_global: boolean;
-  /** The fitted curve's value at this row's TVL, before the category factor. */
+  /** The fitted curve's value at this row's TVL, before the multipliers. */
   curve_usd: number;
-  /** The category factor that adjusted the curve for this row. */
-  category_factor: number;
-  /** True when the category has fewer than 3 live comps, so the factor was shrunk toward 1. */
-  factor_shrunk: boolean;
   comp_members: CompMember[];
   growth_multiplier: number;
   maturity_multiplier: number;
@@ -328,6 +346,59 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
+/** The verdict rule a ticket is struck under. 'net_positive' is the shipped Slot #6 rule (FARM when net > 0); 'net_per_hour' is a $/h floor on the ticket's net; 'breakeven_odds' is nightshift's rule — the odds a launch must have to repay the ticket's costs, (gas + forgone) / slice. */
+export type VerdictRule =
+  | { kind: 'net_positive' }
+  | { kind: 'net_per_hour'; threshold_usd: number }
+  | { kind: 'breakeven_odds'; farm_max: number; thin_max: number };
+
+/** One verdict split: FARM / THIN / SKIP counts under one candidate bar. */
+export interface VerdictSplit {
+  farm: number;
+  thin: number;
+  skip: number;
+}
+
+/**
+ * The Slot #7 bar decision (§5.1 rule), executed on the remodelled board and recorded here so the
+ * page states it from computed numbers:
+ * - rule 1: remodel + break-even-odds ≤10% FARM / ≤25% THIN gives FARM 6 / THIN 28 / SKIP 164 —
+ *   below the field floor of 10 (the field's $1,000 FARM range is 10–85), so break-even-odds was
+ *   tried first and did not yield a viable bucket; rank-1 Steakhouse's break-even odds are 157.4%.
+ * - rule 2: $10/h adopted BY ELIMINATION as a labelled judgement call — $25/h is excluded
+ *   (remodel+$25/h → 5/88/105, a 5-row bucket below the field floor); net > 0 is excluded because
+ *   it IS the defect (83 FARM, median $8.63/h). $10/h is never "the honest middle" and never
+ *   field-supported: 0/10 top-10 entries use it.
+ */
+export interface BarDecision {
+  rule: VerdictRule;
+  /** 'breakeven_odds' when rule 1 applied, 'per_hour_judgement' when rule 2 applied by elimination. */
+  chosen_by: 'breakeven_odds' | 'per_hour_judgement';
+  candidates: { breakeven_odds: VerdictSplit; per_hour_25: VerdictSplit; per_hour_10: VerdictSplit; net_positive: VerdictSplit };
+  /** Median net/h of the net > 0 FARM rows — the defect's size, printed next to the elimination. */
+  net_positive_median_per_hour: number;
+}
+
+/** The verdict rule the Slot #7 board is struck under: $10/h, adopted by elimination (see BarDecision). */
+export const VERDICT_RULE: VerdictRule = { kind: 'net_per_hour', threshold_usd: 10 };
+
+/** The verdict one ticket gets under a rule. THIN throughout = beats its cash fees only (slice − gas > 0) but fails the bar; SKIP does not cover its fees. */
+export function verdictFor(
+  sliceUsd: number,
+  gasUsd: number,
+  forgoneUsd: number,
+  netUsd: number,
+  netPerHourUsd: number,
+  rule: VerdictRule = VERDICT_RULE,
+): 'FARM' | 'THIN' | 'SKIP' {
+  if (rule.kind === 'net_per_hour') return netPerHourUsd >= rule.threshold_usd ? 'FARM' : sliceUsd - gasUsd > 0 ? 'THIN' : 'SKIP';
+  if (rule.kind === 'breakeven_odds') {
+    const odds = sliceUsd > 0 ? (gasUsd + forgoneUsd) / sliceUsd : Infinity;
+    return odds <= rule.farm_max ? 'FARM' : odds <= rule.thin_max ? 'THIN' : 'SKIP';
+  }
+  return netUsd > 0 ? 'FARM' : sliceUsd - gasUsd > 0 ? 'THIN' : 'SKIP';
+}
+
 /** Everything the dashboard needs: the board, the live set, the comps and the model. */
 export interface RadarData {
   as_of: string;
@@ -342,8 +413,15 @@ export interface RadarData {
   global_comp: number;
   /** The board's implied values added up: the headline's answer. */
   total_implied_usd: number;
-  /** How the standard tickets came out: FARM pays after fees and the assumed T-bill, THIN beats its fees only, SKIP does not cover them. */
-  verdict_counts: { farm: number; thin: number; skip: number };
+  /** How the standard tickets came out under the chosen bar (see verdict_rule): FARM clears the bar, THIN beats its fees only, SKIP does not cover them. ROBUST is the FARM rows that pay even at the low end of their band. */
+  verdict_counts: { farm: number; thin: number; skip: number; robust: number };
+  /** The verdict rule the tickets were struck under, with the candidate bars' verdicts on this board so the page states the elimination from computed numbers, not from a carried claim. */
+  verdict_rule: VerdictRule;
+  bar_decision: BarDecision;
+  /** Farming every FARM row at the $1,000 ticket: the summed net and the summed plan hours, for the chosen bar only. */
+  farm_book: { net_usd: number; hours: number };
+  /** How size-ordered the remodelled board is: Spearman rank correlation between board rank and TVL-descending rank. */
+  spearman_tvl: number;
   /** The ticket's own stated assumptions, so the page recomputes it from the same numbers. */
   farm: FarmAssumptions;
   /** The fitted size curve: log10(mcap) = intercept + slope*log10(tvl), read off this snapshot. */
@@ -444,9 +522,10 @@ export function isRankable(p: SnapshotProtocol): boolean {
 // and shown with the market's own value, never mixed into the ranking.
 //
 // Implied value is calibrated on the snapshot itself, not on a flat guess:
-// the market's own mcap/TVL multiple for each category is read off the
-// live-token protocols in the same snapshot, so a lending protocol is
-// priced like lending protocols that already trade, and a DEX like DEXs.
+// the market's own size curve is fitted on the live-token protocols in
+// the same snapshot (see the header comment), and the curve prices every
+// row — no category adjustment since Slot #7 dropped the factor. The
+// flat category median below is kept only as the baseline the curve beat.
 //
 //   comp(category) = median(mcap_usd / tvl_usd) over live-token protocols
 //                    in that category (winsorised to [0.01, 5]); categories
@@ -457,16 +536,14 @@ export function isRankable(p: SnapshotProtocol): boolean {
 //                    (age = days since first listed with no token;
 //                     unknown age counts as 365 days)
 //   breadth        = 1 + 0.02 * min(chains - 1, 5)   (at most 1.10)
-//   implied        = max(1, round(tvl_usd * comp * growthMult
+//   implied        = max(1, round(curve(tvl_usd) * growthMult
 //                                  * maturity * breadth))
 //
 // radar-3 adds what the detail view needs to defend the number: every
 // category's comp now names the live protocols it was read off (the five
 // biggest by market cap, with their own ratios), and every row carries
-// whether its multiple is its category's median or the global fallback —
-// 84 of the 198 rows fall back, most of all the Risk Curators at the top,
-// whose single live comp (2.98x) is too thin to price a category.
-// The dashboard says so on the row, instead of printing a bare 0.17x.
+// whether its multiple is its category's median or the global fallback.
+// The dashboard says so on the row, instead of printing a bare multiple.
 // Farm plans stay derived from the protocol's own record, and each row
 // now carries a one-line farm summary (capital, gas, hold, setup time)
 // so a reader can size the whole plan before reading its seven steps.
@@ -504,8 +581,6 @@ export function categoryComps(snapshot: Snapshot, model: ModelConstants = MODEL)
       live_count: entry.ratios.length,
       median_multiple: entry.ratios.length >= model.comp_min_live ? median(entry.ratios) : global,
       used_global: entry.ratios.length < model.comp_min_live,
-      // Filled in by buildRadar from the fitted factors; 1 until then.
-      curve_factor: 1,
       members: entry.members
         .sort((a, b) => b.mcap - a.mcap || (a.name < b.name ? -1 : 1))
         .slice(0, 5)
@@ -536,14 +611,12 @@ export interface SizeCurve {
   /** b: sublinear below 1 — a dollar of TVL is worth less at $5B than at $5M. */
   slope: number;
   live_count: number;
-  /** Per-category factor, from the live comps' median residual off the curve, shrunk toward 1 when few comps. */
-  factors: { category: string; factor: number; live_count: number }[];
   /** Per-category residual band: the middle half (25th–75th percentile) of the category's live comps' residuals off the curve, in log10. */
   bands: { category: string; p25: number; p75: number; live_count: number }[];
   /** The market-wide residual band, for categories too thin to set their own. */
   globalBand: { p25: number; p75: number; live_count: number };
   validation: { fitted: LooScore; flat: LooScore };
-  /** The factor the printed band is widened by around its centre (1 = the raw P25–P75 of residuals), set by the band calibration in buildRadar. Bands never feed implied values. */
+  /** The widening the printed band is widened by around its centre (1 = the raw P25–P75 of residuals), set by the band calibration in buildRadar. Bands never feed implied values. */
   band_widen: number;
 }
 
@@ -625,30 +698,6 @@ function fitY(p: SnapshotProtocol, model: ModelConstants): number {
   return Math.log10(p.tvl_usd) + Math.log10(ratio);
 }
 
-/** Per-category factors off a fitted line: each category's median residual, shrunk toward no adjustment when the category has few live comps. */
-function categoryFactors(
-  rows: SnapshotProtocol[],
-  intercept: number,
-  slope: number,
-  model: ModelConstants,
-): Map<string, { factor: number; live_count: number }> {
-  const by = new Map<string, number[]>();
-  for (const p of rows) {
-    const r = fitY(p, model) - (intercept + slope * Math.log10(p.tvl_usd));
-    const key = p.category ?? 'Other';
-    const list = by.get(key) ?? [];
-    list.push(r);
-    by.set(key, list);
-  }
-  const out = new Map<string, { factor: number; live_count: number }>();
-  for (const [category, residuals] of [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
-    const n = residuals.length;
-    const shrink = n / (n + model.comp_min_live);
-    out.set(category, { factor: 10 ** (median(residuals) * shrink), live_count: n });
-  }
-  return out;
-}
-
 /** A quantile of a sorted array by linear interpolation (type-7): q in [0, 1]. */
 function quantile(sorted: number[], q: number): number {
   const n = sorted.length;
@@ -661,7 +710,7 @@ function quantile(sorted: number[], q: number): number {
   return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
 }
 
-/** Every live token's residual off the fitted line, per category and pooled across the market — the same winsorised residuals categoryFactors reads. */
+/** Every live token's residual off the fitted line, per category and pooled across the market — the same winsorised residuals the bands read. */
 function residualLists(
   rows: SnapshotProtocol[],
   intercept: number,
@@ -698,7 +747,7 @@ export function multipliers(
   return { growthPct, growthMult, maturityMult, breadthMult, age };
 }
 
-/** Leave-one-out validation of the fitted curve against the flat multiple, on the same snapshot: each live token is predicted from a fit that never saw it, and from the flat comps table recomputed without it. */
+/** Leave-one-out validation of the shipped remodel against the flat multiple, on the same snapshot: each live token is predicted from a fit that never saw it, and from the flat comps table recomputed without it. The remodel is curve x growth x maturity x breadth — no category factor. */
 function leaveOneOut(snapshot: Snapshot, rows: SnapshotProtocol[], model: ModelConstants): { fitted: LooScore; flat: LooScore } {
   const fittedMiss: number[] = [];
   const flatMiss: number[] = [];
@@ -709,11 +758,8 @@ function leaveOneOut(snapshot: Snapshot, rows: SnapshotProtocol[], model: ModelC
       rest.map((p) => Math.log10(p.tvl_usd)),
       rest.map((p) => fitY(p, model)),
     );
-    const fac = categoryFactors(rest, intercept, slope, model);
-    const entry = fac.get(held.category ?? 'Other');
-    const factor = entry === undefined ? 1 : entry.factor;
     const m = multipliers(held, snapshot.as_of, model);
-    const fittedPred = 10 ** intercept * held.tvl_usd ** slope * factor * m.growthMult * m.maturityMult * m.breadthMult;
+    const fittedPred = 10 ** intercept * held.tvl_usd ** slope * m.growthMult * m.maturityMult * m.breadthMult;
     const actual = held.mcap_usd ?? 0;
     fittedMiss.push(Math.max(fittedPred / actual, actual / fittedPred));
     const reduced: Snapshot = { ...snapshot, protocols: snapshot.protocols.filter((p) => p.slug !== held.slug) };
@@ -741,12 +787,9 @@ export function fitSizeCurveOnRows(snapshot: Snapshot, rows: SnapshotProtocol[],
     rows.map((p) => Math.log10(p.tvl_usd)),
     rows.map((p) => fitY(p, model)),
   );
-  const factors = [...categoryFactors(rows, intercept, slope, model).entries()]
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-    .map(([category, v]) => ({ category, factor: v.factor, live_count: v.live_count }));
   // The residual bands: each category's middle half around the fitted
   // curve, and the market-wide middle half for categories too thin to
-  // set their own. Same residuals the factors read, so the band and the
+  // set their own. Same residuals the bands read, so the band and the
   // point are one model, not two.
   const { byCategory, global: globalResiduals } = residualLists(rows, intercept, slope, model);
   const globalSorted = [...globalResiduals].sort((a, b) => a - b);
@@ -757,14 +800,14 @@ export function fitSizeCurveOnRows(snapshot: Snapshot, rows: SnapshotProtocol[],
       const s = [...list].sort((a, b) => a - b);
       return { category, p25: quantile(s, 0.25), p75: quantile(s, 0.75), live_count: list.length };
     });
-  return { intercept, slope, live_count: rows.length, factors, bands, globalBand, validation: leaveOneOut(snapshot, rows, model), band_widen: 1 };
+  return { intercept, slope, live_count: rows.length, bands, globalBand, validation: leaveOneOut(snapshot, rows, model), band_widen: 1 };
 }
 
-/** Widen a residual band around its centre by a factor in log10 space: the middle stays where the residuals put it, the half-width grows. At factor 1 the band is the raw P25–P75. */
-export function widenBand(p25: number, p75: number, factor: number): { p25: number; p75: number } {
+/** Widen a residual band around its centre by a widening in log10 space: the middle stays where the residuals put it, the half-width grows. At widening 1 the band is the raw P25–P75. */
+export function widenBand(p25: number, p75: number, widen: number): { p25: number; p75: number } {
   const centre = (p25 + p75) / 2;
   const half = (p75 - p25) / 2;
-  return { p25: centre - half * factor, p75: centre + half * factor };
+  return { p25: centre - half * widen, p75: centre + half * widen };
 }
 
 // ---- Slot #6: term-by-term validation on two held-out tests ----
@@ -794,13 +837,17 @@ export interface BandHonesty {
   middle_measured: number;
   outer_measured: number;
   n: number;
+  /** Measured coverage at widen x1.22 and x1.26 under the remodel — re-measured here, never assumed from the shipped variant. */
+  at122: { middle: number; outer: number };
+  at126: { middle: number; outer: number };
 }
 
-/** A variant kind the term table can fit and score. 'slopeK' fits a slope per category, shrunk toward the global slope with weight n/(n+K). */
+/** A variant kind the term table can fit and score. 'slopeK' fits a slope per category, shrunk toward the global slope with weight n/(n+K). 'curveFactor' is the dropped category factor (curve plus factor, no multipliers); 'curveMults' is the shipped remodel (curve plus the three multipliers, no factor). */
 export type VariantKind =
   | 'flat'
   | 'curve'
   | 'curveFactor'
+  | 'curveMults'
   | 'shipped'
   | 'hinge'
   | 'quad'
@@ -849,12 +896,13 @@ function factorsOffBase(rows: SnapshotProtocol[], baseLog: (p: SnapshotProtocol)
 
 /**
  * One variant fitted on train rows: a function predicting a protocol's market cap.
- * Line-based variants fit log10(mcap) on log10(TVL) plus at most one extra term, then take the
- * category factor off the residuals — the shipped construction, with one piece changed at a time.
- * 'flat' is the category-median multiple with the multipliers; 'slopeK' fits a slope per category
- * (shrunk toward the global slope) and no separate factor; 'family' adds a first-word-of-category
- * factor on top of the shipped model; 'chainReg'/'ageReg' replace the breadth/maturity multiplier
- * with a fitted regressor on the same input.
+ * Line-based variants fit log10(mcap) on log10(TVL) plus at most one extra term, with one piece
+ * changed at a time. The category factor survives here ONLY as the dropped 'curveFactor' variant
+ * (and the 'family' variant, which adds a first-word-of-category factor on top of the remodel):
+ * the shipped model carries no factor. 'flat' is the category-median multiple with the
+ * multipliers; 'slopeK' fits a slope per category (shrunk toward the global slope) and no
+ * separate factor; 'chainReg'/'ageReg' replace the breadth/maturity multiplier with a fitted
+ * regressor on the same input.
  */
 function fitVariant(
   train: SnapshotProtocol[],
@@ -930,7 +978,7 @@ function fitVariant(
     const byFam = new Map<string, number[]>();
     for (const p of train) {
       const f = (p.category ?? 'Other').split(' ')[0]!;
-      const r = fitY(p, model) - baseLog(p) - Math.log10(fac.get(p.category ?? 'Other') ?? 1);
+      const r = fitY(p, model) - baseLog(p);
       const list = byFam.get(f) ?? [];
       list.push(r);
       byFam.set(f, list);
@@ -942,15 +990,16 @@ function fitVariant(
   return (p) => {
     const base = 10 ** baseLog(p);
     if (kind === 'curve') return base;
-    let v = base * (fac.get(p.category ?? 'Other') ?? 1);
-    if (kind === 'curveFactor') return v;
-    if (kind === 'family') v *= fam.get((p.category ?? 'Other').split(' ')[0]!) ?? 1;
-    if (kind === 'chainReg') return v * variantMultipliers(p, asOf, model, 'breadth');
-    if (kind === 'ageReg') return v * variantMultipliers(p, asOf, model, 'maturity');
-    if (kind === 'noGrowth') return v * variantMultipliers(p, asOf, model, 'growth');
-    if (kind === 'noMaturity') return v * variantMultipliers(p, asOf, model, 'maturity');
-    if (kind === 'noBreadth') return v * variantMultipliers(p, asOf, model, 'breadth');
-    return v * variantMultipliers(p, asOf, model);
+    // The dropped factor: only 'curveFactor' applies it (curve plus factor, no multipliers).
+    if (kind === 'curveFactor') return base * (fac.get(p.category ?? 'Other') ?? 1);
+    if (kind === 'family') return base * (fam.get((p.category ?? 'Other').split(' ')[0]!) ?? 1) * variantMultipliers(p, asOf, model);
+    if (kind === 'chainReg') return base * variantMultipliers(p, asOf, model, 'breadth');
+    if (kind === 'ageReg') return base * variantMultipliers(p, asOf, model, 'maturity');
+    if (kind === 'noGrowth') return base * variantMultipliers(p, asOf, model, 'growth');
+    if (kind === 'noMaturity') return base * variantMultipliers(p, asOf, model, 'maturity');
+    if (kind === 'noBreadth') return base * variantMultipliers(p, asOf, model, 'breadth');
+    // 'shipped' and 'curveMults': curve x growth x maturity x breadth — no category factor.
+    return base * variantMultipliers(p, asOf, model);
   };
 }
 
@@ -1078,8 +1127,8 @@ function looBandEdges(rows: SnapshotProtocol[], snapshot: Snapshot, model: Model
     const m = multipliers(held, snapshot.as_of, model);
     const mults = m.growthMult * m.maturityMult * m.breadthMult;
     const curve = 10 ** intercept * held.tvl_usd ** slope;
-    const facRes = catRes.length > 0 ? median(catRes) * (catRes.length / (catRes.length + model.comp_min_live)) : 0;
-    const point = curve * 10 ** facRes * mults;
+    // The remodel's point: curve x growth x maturity x breadth — no category factor.
+    const point = curve * mults;
     edges.push({
       actual: held.mcap_usd ?? 0,
       point,
@@ -1114,25 +1163,22 @@ function bandCoverageAt(edges: LooBandEdge[], widen: number): { middle: number; 
 }
 
 /**
- * Band recalibration: the raw P25–P75 band holds too few held-out tokens (35.9% on the 92), so widen
- * it by the smallest factor, in 0.01 steps up to 3.00, whose leave-one-out middle coverage reaches
- * 50% — the field's middle band holds 45–60%. The measured coverages, before and after, are
- * printed next to the band; the widened band never feeds implied values.
+ * Band recalibration under the remodel: measure leave-one-out coverage at widen x1.22 and x1.26
+ * (the x1.26 → 73.9% figure was measured on the shipped variant and is never assumed — it is
+ * re-measured here). Adopt the smallest widening reaching outer coverage ≥ 73% — the field's
+ * printed P10–P90 floor — and keep x1.22 when neither reaches it, printing the measured truth.
+ * Then widen further in 0.01 steps only if the middle coverage is still below 50% (the field's
+ * middle band holds 45–60%). 80% is never chased. The widened band never feeds implied values.
  */
 export function calibrateBand(rows: SnapshotProtocol[], snapshot: Snapshot, model: ModelConstants = MODEL): BandHonesty {
   const edges = looBandEdges(rows, snapshot, model);
   const before = bandCoverageAt(edges, 1);
-  let widen = 1;
-  for (let h = 101; h <= 300; h++) {
-    const w = h / 100;
-    if (bandCoverageAt(edges, w).middle >= 0.5) {
-      widen = w;
-      break;
-    }
-    widen = w;
-  }
+  const at122 = bandCoverageAt(edges, 1.22);
+  const at126 = bandCoverageAt(edges, 1.26);
+  let widen = at122.outer >= 0.73 ? 1.22 : at126.outer >= 0.73 ? 1.26 : 1.22;
+  while (widen <= 3 && bandCoverageAt(edges, widen).middle < 0.5) widen = Math.round((widen + 0.01) * 100) / 100;
   const measured = bandCoverageAt(edges, widen);
-  return { widen: round2(widen), middle_before: before.middle, outer_before: before.outer, middle_measured: measured.middle, outer_measured: measured.outer, n: rows.length };
+  return { widen: round2(widen), middle_before: before.middle, outer_before: before.outer, middle_measured: measured.middle, outer_measured: measured.outer, n: rows.length, at122, at126 };
 }
 
 /** How one variant's headline medians compare with the shipped model's, on the two held-out tests. */
@@ -1154,9 +1200,10 @@ function variantVerdict(
 /**
  * The term-by-term table: every step of the shipped model and every term tried and dropped, each
  * with both held-out tests' numbers (leave-one-out and both walk-forward splits). The shipped
- * model is the curve on the 92 stand-alone tokens plus the category factor plus the three
- * multipliers; nothing here is a number from another entry — every figure is recomputed from
- * this snapshot by the variants above.
+ * model is the curve on the 92 stand-alone tokens plus the three multipliers — no category
+ * factor; the factor survives here only as the dropped '+ category factor' row, the record of
+ * the term that lost on all three tests. Nothing here is a number from another entry — every
+ * figure is recomputed from this snapshot by the variants above.
  */
 export function buildTermTable(snapshot: Snapshot, model: ModelConstants = MODEL): TermRow[] {
   const rows92 = fitRows(snapshot);
@@ -1188,11 +1235,12 @@ export function buildTermTable(snapshot: Snapshot, model: ModelConstants = MODEL
   const family = run(rows92, 'family');
   const chainReg = run(rows92, 'chainReg');
   const ageReg = run(rows92, 'ageReg');
+  const factor = run(rows92, 'curveFactor');
   const table: TermRow[] = [
     { term: 'Flat multiple', kind: 'step', ...run(rows92, 'flat'), note: 'Category median mcap/TVL, the baseline the curve beat.' },
-    { term: 'Size curve', kind: 'step', ...run(rows92, 'curve'), note: 'Log-log curve alone — the sharpest held-out mcap predictor.' },
-    { term: '+ category factor', kind: 'step', ...run(rows92, 'curveFactor'), note: 'Adds the category factor (median residual off the curve, shrunk n/(n+3)).' },
-    { term: '+ growth, maturity, breadth', kind: 'shipped', ...shipped, note: 'The shipped model: curve x factor x growth x maturity x breadth.' },
+    { term: 'Size curve', kind: 'step', ...run(rows92, 'curve'), note: 'Log-log curve alone.' },
+    { term: '+ category factor', kind: 'dropped', ...factor, note: `The category factor (median residual off the curve, shrunk n/(n+3)); ${variantVerdict(factor, shipped)} — tested and dropped, not kept.` },
+    { term: '+ growth, maturity, breadth', kind: 'shipped', ...shipped, note: 'The shipped model: curve x growth x maturity x breadth — no category factor.' },
     {
       term: 'Hinge above $1B TVL',
       kind: 'dropped',
@@ -1235,20 +1283,12 @@ export function walkForwardFromTable(table: TermRow[]): WalkForwardScores {
   return { half: shipped.wf_half, days900: shipped.wf_900 };
 }
 
-/** The fitted curve's value for one TVL, before the category factor and the multipliers. */
+/** The fitted curve's value for one TVL, before the multipliers. */
 function curveValue(tvlUsd: number, curve: SizeCurve): number {
   return 10 ** curve.intercept * Math.max(1, tvlUsd) ** curve.slope;
 }
 
-/** One category's factor off the fitted curve, or 1 when no live-token protocol in the category records a market cap. */
-function factorFor(category: string | null, curve: SizeCurve): { factor: number; liveCount: number } {
-  if (category === null) return { factor: 1, liveCount: 0 };
-  const row = curve.factors.find((f) => f.category === category);
-  if (row === undefined) return { factor: 1, liveCount: 0 };
-  return { factor: row.factor, liveCount: row.live_count };
-}
-
-/** The residual band for a category: its own middle half when it has enough live comps, else the market-wide spread — widened by the fit's calibrated band factor around its centre, so the printed band's held-out coverage matches what the page claims. Degenerate (no live comps anywhere) returns a zero-width band, so the caller still expands it to the point. */
+/** The residual band for a category: its own middle half when it has enough live comps, else the market-wide spread — widened by the fit's calibrated band widening around its centre, so the printed band's held-out coverage matches what the page claims. Degenerate (no live comps anywhere) returns a zero-width band, so the caller still expands it to the point. */
 function bandFor(
   category: string | null,
   fit: SizeCurve,
@@ -1267,20 +1307,19 @@ function bandFor(
   return { p25: w.p25, p75: w.p75, usedGlobal: true };
 }
 
-/** The multipliers and the implied value one protocol gets under the fitted curve and the comps table. */
+/** The multipliers and the implied value one protocol gets under the fitted curve and the comps table: curve x growth x maturity x breadth. No category factor — it was tested and dropped. The flat category median is carried only as the baseline for comparison. */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
   pricing: { fit: SizeCurve; comps: { global: number; comps: CategoryComp[] } },
   model: ModelConstants = MODEL,
-): { implied: number; curveUsd: number; categoryFactor: number; comp: number; compLive: number; growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
+): { implied: number; curveUsd: number; comp: number; compLive: number; growthPct: number; growthMult: number; maturityMult: number; breadthMult: number; age: number | null } {
   const m = multipliers(protocol, asOf, model);
   const curve = curveValue(protocol.tvl_usd, pricing.fit);
-  const { factor, liveCount } = factorFor(protocol.category, pricing.fit);
   const table = new Map(pricing.comps.comps.map((c) => [c.category, c]));
   const { multiple: comp, liveCount: compLive } = compFor(protocol.category, table, pricing.comps.global);
-  const implied = Math.max(1, Math.round(curve * factor * m.growthMult * m.maturityMult * m.breadthMult));
-  return { implied, curveUsd: Math.round(curve), categoryFactor: factor, comp, compLive, growthPct: m.growthPct, growthMult: m.growthMult, maturityMult: m.maturityMult, breadthMult: m.breadthMult, age: m.age };
+  const implied = Math.max(1, Math.round(curve * m.growthMult * m.maturityMult * m.breadthMult));
+  return { implied, curveUsd: Math.round(curve), comp, compLive, growthPct: m.growthPct, growthMult: m.growthMult, maturityMult: m.maturityMult, breadthMult: m.breadthMult, age: m.age };
 }
 
 /** The standard farm ticket the board prices every row at, in dollars: a yardstick, not a deposit — the verdict is struck at TICKET_USD so rows compare on one size, while the plan's own deposit (its TVL tier) is priced beside it. */
@@ -1325,7 +1364,7 @@ export interface TicketEconomics {
   net_usd: number;
   /** Net per hour of the plan's time: 35 minutes to set up, 10 a week, 10 to check, 10 to claim. */
   net_per_hour_usd: number;
-  /** FARM pays after fees and the T-bill; THIN beats its fees but not the T-bill; SKIP does not cover its fees. */
+  /** FARM clears the chosen bar (see VERDICT_RULE); THIN beats its fees but not the bar; SKIP does not cover its fees. */
   verdict: 'FARM' | 'THIN' | 'SKIP';
   /** The ticket at which the plan breaks even, or null when the T-bill beats it at any size. */
   pays_from_usd: number | null;
@@ -1428,8 +1467,8 @@ export const FARM: FarmAssumptions = {
  * chain's assumed per-transaction rate: funding is one transaction,
  * deposit + claim two, weekly two a week, so gas = tx * (3 + 2*weeks)
  * on one scale and the steps state the same dollars the ticket totals.
- * The verdict is the ticket's own arithmetic: FARM when the slice
- * clears gas and the T-bill, THIN when it clears gas alone, SKIP when
+ * The verdict is struck under VERDICT_RULE ($10/h, adopted by elimination — see BarDecision):
+ * FARM when the ticket nets at least $10 an hour, THIN when it clears gas alone, SKIP when
  * it does not cover its fees. The plan's own deposit is priced beside
  * the yardstick with the same gas and the same assumed T-bill, sized
  * as max(TVL tier, pays_from) rounded up to the next $25 when
@@ -1473,7 +1512,7 @@ export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, 
     forgone_usd: round2(forgone),
     net_usd: round2(net),
     net_per_hour_usd: round2(netPerHour),
-    verdict: net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP',
+    verdict: verdictFor(slice, gas, forgone, net, netPerHour),
     pays_from_usd: paysExact === null ? null : Math.round(paysExact),
     hold_days: hold,
     deposit_usd: deposit,
@@ -1516,7 +1555,6 @@ export function buildBoard(
       comp_multiple: s.v.comp,
       comp_live_count: s.v.compLive,
       curve_usd: s.v.curveUsd,
-      category_factor: s.v.categoryFactor,
       growth_pct: s.v.growthPct,
       growth_multiplier: s.v.growthMult,
       maturity_multiplier: s.v.maturityMult,
@@ -1765,7 +1803,7 @@ export function radarRow(
   // The range the row spans: the middle half of its category's live
   // comps around the fitted curve (25th–75th percentile of their
   // residuals off the curve), widened by the fit's calibrated band
-  // factor so the printed band's held-out coverage matches what the
+  // widening so the printed band's held-out coverage matches what the
   // page claims — so the band is the model's own uncertainty, the same
   // curve and multipliers as the point, not a second model. Categories
   // too thin to set their own band use the whole market's spread, so
@@ -1798,8 +1836,6 @@ export function radarRow(
     comp_live_count: compRow?.live_count ?? 0,
     comp_used_global: compRow?.used_global ?? true,
     curve_usd: row.model.curve_usd,
-    category_factor: row.model.category_factor,
-    factor_shrunk: (compRow?.live_count ?? 0) < MODEL.comp_min_live,
     comp_members: compRow?.members ?? [],
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
@@ -1828,17 +1864,9 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   fit.band_widen = band_honesty.widen;
   const liveTotal = allLiveRows(snapshot).length;
   const live = liveRows(snapshot);
-  // The comps table carries the fitted factor beside the flat median, so
-  // the dashboard can show both the curve's adjustment and the baseline
-  // the curve beat.
-  const factorByCategory = new Map(fit.factors.map((f) => [f.category, f.factor]));
-  const compsWithFactors = {
-    global: comps.global,
-    comps: comps.comps.map((c) => ({ ...c, curve_factor: factorByCategory.get(c.category) ?? 1 })),
-  };
   const watch = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watch.has(r.slug)).length;
-  const verdict_counts = { farm: 0, thin: 0, skip: 0 };
+  const verdict_counts = { farm: 0, thin: 0, skip: 0, robust: 0 };
   let total = 0;
   for (const r of board) {
     total += r.implied_value_usd;
@@ -1846,6 +1874,54 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     else if (r.ticket.verdict === 'THIN') verdict_counts.thin++;
     else verdict_counts.skip++;
   }
+  const rows = board.map((r) => radarRow(r, watch, comps, fit, model));
+  // ROBUST and the farm book, for the CHOSEN bar only: a FARM row is ROBUST when its slice at
+  // the low end of its band still covers gas plus forgone yield; the book sums the FARM rows'
+  // nets and plan hours. Never carried from another bar or model.
+  let bookNet = 0;
+  let bookHours = 0;
+  for (const row of rows) {
+    if (row.ticket.verdict !== 'FARM') continue;
+    const sliceLow = row.ticket.slice_usd * ((row.implied_low_usd ?? row.implied_value_usd) / row.implied_value_usd);
+    if (sliceLow - row.ticket.gas_usd - row.ticket.forgone_usd > 0) verdict_counts.robust++;
+    bookNet += row.ticket.net_usd;
+    bookHours += (55 + 10 * Math.floor(row.ticket.hold_days / 7)) / 60;
+  }
+  // The bar decision's candidates, struck on this board from the printed ticket numbers, so the
+  // page states the elimination from computed counts.
+  const splitFor = (rule: VerdictRule): VerdictSplit => {
+    const s: VerdictSplit = { farm: 0, thin: 0, skip: 0 };
+    for (const r of board) {
+      const v = verdictFor(r.ticket.slice_usd, r.ticket.gas_usd, r.ticket.forgone_usd, r.ticket.net_usd, r.ticket.net_per_hour_usd, rule);
+      if (v === 'FARM') s.farm++;
+      else if (v === 'THIN') s.thin++;
+      else s.skip++;
+    }
+    return s;
+  };
+  const candidates = {
+    breakeven_odds: splitFor({ kind: 'breakeven_odds', farm_max: 0.1, thin_max: 0.25 }),
+    per_hour_25: splitFor({ kind: 'net_per_hour', threshold_usd: 25 }),
+    per_hour_10: splitFor({ kind: 'net_per_hour', threshold_usd: 10 }),
+    net_positive: splitFor({ kind: 'net_positive' }),
+  };
+  const netPositiveHours = board.filter((r) => r.ticket.net_usd > 0).map((r) => r.ticket.net_per_hour_usd);
+  const bar_decision: BarDecision = {
+    rule: VERDICT_RULE,
+    chosen_by: candidates.breakeven_odds.farm >= 10 ? 'breakeven_odds' : 'per_hour_judgement',
+    candidates,
+    net_positive_median_per_hour: round2(median(netPositiveHours)),
+  };
+  // Spearman rank correlation between board rank and TVL-descending rank: how size-ordered the remodel is.
+  const byTvl = [...board].sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1));
+  const tvlRank = new Map(byTvl.map((r, i) => [r.slug, i + 1]));
+  let d2 = 0;
+  board.forEach((r, i) => {
+    const d = (i + 1) - (tvlRank.get(r.slug) ?? 0);
+    d2 += d * d;
+  });
+  const n = board.length;
+  const spearman_tvl = Math.round((1 - (6 * d2) / (n * (n * n - 1))) * 1000) / 1000;
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -1859,6 +1935,10 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     global_comp: round4(comps.global),
     total_implied_usd: total,
     verdict_counts,
+    verdict_rule: VERDICT_RULE,
+    bar_decision,
+    farm_book: { net_usd: round2(bookNet), hours: round2(bookHours) },
+    spearman_tvl,
     farm: FARM,
     size_curve: { intercept: fit.intercept, slope: fit.slope, live_count: fit.live_count },
     validation: fit.validation,
@@ -1866,8 +1946,8 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     term_table,
     band_honesty,
     fit_universe: { fitted_live: fit.live_count, live_total: liveTotal, excluded_live: liveTotal - fit.live_count },
-    comps: compsWithFactors.comps,
-    rows: board.map((r) => radarRow(r, watch, compsWithFactors, fit, model)),
+    comps: comps.comps,
+    rows,
     live,
     // The scatter's fitted cloud: the same rows fitSizeCurve fits, in snapshot order.
     fit_points: fitRows(snapshot).map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd ?? 0 })),
