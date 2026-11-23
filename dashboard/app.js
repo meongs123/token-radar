@@ -31,10 +31,6 @@
   function fmtDollars(n) { if (n === null || n === undefined || !isFinite(n)) return 'n/a'; return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function fmtExact(n) { if (n === null || n === undefined || !isFinite(n)) return 'n/a'; var s = n < 0 ? '-' : '', a = Math.abs(n).toFixed(2).split('.'); return s + '$' + a[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + a[1]; }
 
-  // The model in one function, first in this file so the dossier text
-  // never cuts it: the page recomputes a row and checks the number
-  // board.json carries. Curve x growth x maturity x breadth — no
-  // category factor since Slot #7 (it loses on all three tests).
   function impliedOf(row, model) {
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * model.growth_weight, age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
@@ -69,7 +65,6 @@
     var tier = tierCapitalFor(row), pays = paysExactOf(row);
     if (pays === null || pays > DATA.farm.ticket_usd) return tier;
     var deposit = Math.max(tier, Math.ceil(pays / 25) * 25), gr = gasRateOf(row);
-    // Lift while unrounded net < $0.10 — mirrors planCapitalFor.
     if (gr.rate > 0) { while (deposit < DATA.farm.ticket_usd && deposit * gr.rate - gr.gas < 0.10) deposit += 25; }
     return deposit;
   }
@@ -194,7 +189,6 @@
     else window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
-  // First two chains, or the fallback.
   function chainLabel(r) { return (r.chains && r.chains.length) ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain'; }
 
   function rows() {
@@ -415,7 +409,6 @@
     var X = function (v) { return (8 + (v - x0) / dx * (W - 16)).toFixed(1); };
     var Y = function (v) { return (H - 6 - (v - y0) / dy * (H - 12)).toFixed(1); };
     var sres = res.slice().sort(function (a, b) { return a - b; });
-    // The scatter draws the widened band too.
     var widen = DATA.band_honesty ? DATA.band_honesty.widen : 1;
     var raw25 = quantile(sres, 0.25), raw75 = quantile(sres, 0.75);
     var mid = (raw25 + raw75) / 2, half = (raw75 - raw25) / 2 * widen;
@@ -538,9 +531,9 @@
     (DATA.term_table || []).forEach(function (t) {
       tbody.appendChild(el('tr', null,
         el('td', null, el('b', { text: t.term })),
-        el('td', { class: 'num', text: 'x' + t.loo.median_miss.toFixed(2) + ' · ' + Math.round(t.loo.within_3x * 1000) / 10 + '%' }),
-        el('td', { class: 'num', text: 'x' + t.wf_half.median_miss.toFixed(2) + ' · ' + Math.round(t.wf_half.within_3x * 1000) / 10 + '%' }),
-        el('td', { class: 'num', text: 'x' + t.wf_900.median_miss.toFixed(2) + ' · ' + Math.round(t.wf_900.within_3x * 1000) / 10 + '%' }), el('td', { text: t.note })));
+        el('td', { class: 'num', text: fmtTest(t.loo) }),
+        el('td', { class: 'num', text: fmtTest(t.wf_half) }),
+        el('td', { class: 'num', text: fmtTest(t.wf_900) }), el('td', { text: t.note })));
     });
     return el('section', { class: 'panel' },
       el('h2', { text: 'What was tried, and what won' }),
@@ -646,11 +639,26 @@
     if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); } else dialog.setAttribute('open', '');
   }
 
+  function fmtTest(s) { return 'x' + s.median_miss.toFixed(2) + ' · ' + Math.round(s.within_3x * 1000) / 10 + '%'; }
+
+  function decisiveTable() {
+    var tb = el('tbody');
+    (DATA.term_table || []).forEach(function (t) {
+      if (['Size curve', '+ category factor', '+ growth, maturity, breadth'].indexOf(t.term) < 0) return;
+      tb.appendChild(el('tr', null,
+        el('td', null, el('b', { text: t.term })),
+        el('td', { class: 'num', text: 'LOO ' + fmtTest(t.loo) + ' · WF-half ' + fmtTest(t.wf_half) + ' · WF-900 ' + fmtTest(t.wf_900) })));
+    });
+    return el('div', { class: 'table-wrap' }, el('table', { class: 'mini' },
+      el('caption', { text: 'Decisive comparison — outer band: ' + Math.round(DATA.band_honesty.outer_measured * 1000) / 10 + '% inside P10–P90.' }),
+      tb));
+  }
+
   function render() {
     app.textContent = '';
     document.title = 'Token Radar — ' + titleText();
     var shell = el('div', { class: 'shell' });
-    shell.appendChild(header()); shell.appendChild(lede()); shell.appendChild(integrityStrip()); shell.appendChild(formulaBar());
+    shell.appendChild(header()); shell.appendChild(lede()); shell.appendChild(integrityStrip()); shell.appendChild(formulaBar()); shell.appendChild(decisiveTable());
     if (state.tab === 'pre-token') shell.appendChild(spotlight());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
