@@ -5,7 +5,6 @@
   if (!DATA) return;
   var app = document.getElementById('board');
   var state = { q: '', category: 'all', chain: 'all', watchOnly: false, minTvl: 0, tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
-
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
     if (Math.abs(n) >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
@@ -29,7 +28,6 @@
   }
   function fmtDollars(n) { if (n === null || n === undefined || !isFinite(n)) return 'n/a'; return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function fmtExact(n) { if (n === null || n === undefined || !isFinite(n)) return 'n/a'; var s = n < 0 ? '-' : '', a = Math.abs(n).toFixed(2).split('.'); return s + '$' + a[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + a[1]; }
-
   function impliedOf(row, model) {
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * model.growth_weight, age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
@@ -45,7 +43,6 @@
     if (r.kind === 'breakeven_odds') { var o = slice > 0 ? (gas + forgone) / slice : Infinity; return o <= r.farm_max ? 'FARM' : o <= r.thin_max ? 'THIN' : 'SKIP'; }
     return net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP';
   }
-
   function gasTxUsd(chain) {
     var g = DATA.farm.gas_tx, c = (chain || '').toLowerCase(), k;
     for (k in g) { if (k !== 'other' && c.indexOf(k) >= 0) return g[k]; }
@@ -80,7 +77,6 @@
       deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone), deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60))
     };
   }
-
   function el(tag, attrs) {
     var node = document.createElement(tag);
     if (attrs) {
@@ -100,7 +96,6 @@
     }
     return node;
   }
-
   function chainOf(p) { var first = firstChainOf(p); return first === '' ? 'its main chain' : first; }
   function tierCapitalFor(p) { if (p.tvl_usd >= 1e9) return 200; if (p.tvl_usd >= 1e8) return 100; if (p.tvl_usd >= 5e7) return 75; return 50; }
   function gasFor(p) {
@@ -156,13 +151,12 @@
       { text: 'Use a fresh wallet holding only the funds you plan to farm, funded from an exchange, seed phrase offline — never farm from the wallet holding your savings.', cost: 'about ' + fmtGas(DATA.farm.gas_funding_txs * txGas) + ' of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and ' + gas, time: '15 minutes to set up' },
       { text: secondActionFor(p, capital, chain), cost: 'about ' + fmtGas(DATA.farm.gas_weekly_txs * txGas) + ' of gas a week', time: '10 minutes a week' },
-      { text: 'Hold the position at least ' + hold + ' days so the activity spans more than one snapshot; do the weekly action on the same day each week. Abandon the farm if TVL falls below half its starting value or no points program appears within ' + hold + ' days.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
+      { text: 'Hold the position at least ' + hold + ' days so the activity spans more than one snapshot; do the weekly action on the same day each week. Abandon the farm if TVL falls below half its starting value (a judgement call) or no points program appears within ' + hold + ' days.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Before you withdraw, search the protocol name plus 'points' on the official domain only, and check whether your wallet qualifies.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
       { text: "If a token ever launches, claim only from the protocol's own published link and verify the contract twice; never sign a blind approval.", cost: 'gas only, never a claim fee', time: '10 minutes at claim time' },
       { text: 'Log the wallet, the dates and every transaction, then revoke approvals you no longer need on the chain\'s token-approval page.', cost: 'nothing but the log', time: '5 minutes' }
     ].map(stepText);
   }
-
   function readHash() {
     var hash = window.location.hash.replace(/^#/, '');
     if (!hash) return;
@@ -188,7 +182,6 @@
   }
 
   function chainLabel(r) { return (r.chains && r.chains.length) ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain'; }
-
   function rows() {
     var q = state.q.trim().toLowerCase();
     return DATA.rows.filter(function (r) {
@@ -218,7 +211,6 @@
       return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0;
     });
   }
-
   function walkForward() {
     var w = DATA.walk_forward;
     return w && w.days900 ? w.days900.median_miss : null;
@@ -236,7 +228,6 @@
       )
     );
   }
-
   function lede() {
     var vc = DATA.verdict_counts || { farm: 0, thin: 0, skip: 0 };
     var lo = 0, hi = 0;
@@ -266,7 +257,6 @@
         el('div', { class: 'fact' }, el('span', { text: 'Live tokens shown' }), el('b', { text: DATA.live.length + ' of ' + (DATA.ledger ? DATA.ledger.live_token : DATA.live_size) })))
     );
   }
-
   function formulaBar() {
     var top = DATA.rows[0], sc = DATA.size_curve, v = DATA.validation, w = DATA.walk_forward, b = DATA.band_honesty;
     var example = top ? 'Rank 1 works out as ' + fmtUsd(top.curve_usd) + ' curve x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.' : '';
@@ -284,7 +274,6 @@
     var s = led.set_aside || {};
     return (s.bridge || 0) + (s.liquid_staking || 0) + (s.exchange || 0) + (s.versioned || 0) + (s.wrapped || 0) + (s.kin || 0);
   }
-
   function integrityStrip() {
     var n = DATA.rows.length, ok = 0, sum = 0, ordered = true, watch = 0;
     DATA.rows.forEach(function (r, i) {
@@ -303,7 +292,6 @@
       el('p', { text: text })
     );
   }
-
   function ledgerPanel() {
     var led = DATA.ledger;
     if (!led) return null;
@@ -340,7 +328,6 @@
       el('ul', null, items.map(function (t) { return el('li', { text: t }); }))
     );
   }
-
   function spotlight() {
     var top3 = DATA.rows.slice(0, 3);
     return el('section', { class: 'spot', 'aria-label': 'Top three by implied value' },
@@ -386,7 +373,6 @@
     return el('th', { scope: 'col' },
       el('button', { type: 'button', onclick: function () { if (state.sort === key) state.dir = -state.dir; else { state.sort = key; state.dir = -1; } render(); } }, label, state.sort === key ? el('span', { 'aria-hidden': 'true', text: state.dir < 0 ? ' v' : ' ^' }) : null));
   }
-
   function quantile(sorted, q) {
     var n = sorted.length, pos, lo, hi;
     if (n === 0) return 0;
@@ -434,10 +420,9 @@
   function verdictCell(r) {
     var t = r.ticket || ticketOf(r);
     var cls = t.verdict === 'FARM' ? 'farm' : t.verdict === 'THIN' ? 'thin' : 'skipv';
-    var sub = fmtDollars(t.deposit_usd) + ' · ' + (t.pays_from_usd === null ? 'never pays' : 'pays ' + fmtDollars(t.pays_from_usd));
+    var sub = fmtDollars(t.deposit_usd) + ' · ' + (t.pays_from_usd === null ? 'never pays' : 'pays from ' + fmtDollars(t.pays_from_usd));
     return el('td', null, el('div', { class: 'verdict' }, el('span', { class: 'verdict-chip ' + cls, text: t.verdict }), el('span', { class: 'sub', text: sub })));
   }
-
   function boardTable() {
     var list = sortedRows(rows());
     if (list.length === 0) {
@@ -507,7 +492,6 @@
           el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Protocol' }), el('th', { scope: 'col', text: 'TVL' }), el('th', { scope: 'col', text: '7d' }), el('th', { scope: 'col', text: 'Market cap' }), el('th', { scope: 'col', text: 'Token' }))),
           tbody)));
   }
-
   function modelPanel() {
     var m = DATA.model, sc = DATA.size_curve, v = DATA.validation, w = DATA.walk_forward, b = DATA.band_honesty, fu = DATA.fit_universe;
     var bd = DATA.bar_decision;
@@ -535,7 +519,7 @@
     });
     return el('section', { class: 'panel' },
       el('h2', { text: 'What was tried, and what won' }),
-      el('p', { class: 'sub', text: 'Every term below was scored on two held-out tests: leave-one-out and walk-forward by listing date (older fit, newer tested). A term that wins one test but loses the other is not kept; no dropped term beats the shipped model on both tests by a margin the paired bootstrap confirms: the $1B hinge wins on medians, but its bootstrap interval covers zero. The shipped model is the curve with growth, maturity and breadth — no category factor: fitted and dropped, losing on all three tests. The remodel beats the curve alone on all three tests.' }),
+      el('p', { class: 'sub', text: 'Every term below was scored on two held-out tests: leave-one-out and walk-forward by listing date (older fit, newer tested). A term that wins one test but loses the other is not kept; no dropped term beats the shipped model on both tests by a margin the paired bootstrap confirms: the $1B hinge wins on medians, but its bootstrap interval covers zero. The shipped model is the curve with growth, maturity and breadth — no category factor: fitted and dropped, losing on all three tests. The remodel beats the curve alone on median miss on all three tests.' }),
       el('div', { class: 'table-wrap' },
         el('table', null,
           el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Term' }), el('th', { scope: 'col', text: 'Leave-one-out' }), el('th', { scope: 'col', text: 'WF older half → newer' }), el('th', { scope: 'col', text: 'WF 900d+ → newer' }), el('th', { scope: 'col', text: 'Verdict' }))),

@@ -94,10 +94,13 @@
 // every term with both held-out tests. The line is now: intercept
 // 3.0755, slope 0.5098. The 128-token fit (2.3849/0.6048, LOO x3.74,
 // walk-forward x3.46/x3.57) was tested and not kept: wrapped and bridged
-// products bend the slope. The $1B hinge re-tested on the 92 loses LOO
-// (x3.33, 43.5%), wins 42 of 92 tokens, its paired-bootstrap intervals
-// still cover zero, and it wins one walk-forward split only — still
-// selection noise. The printed band was too narrow before recalibration
+// products bend the slope. The $1B hinge re-tested on the 92 wins on
+// medians — LOO x2.97 (50.0% within 3x), 45 of 92 tokens, walk-forward
+// x2.33/x2.18, winning both splits on median — but its paired-bootstrap
+// intervals still cover zero, and an independent re-check agrees (LOO
+// median-difference 95% CI [-0.007, +0.021]; WF-half [-0.113, +0.118],
+// WF-900 [-0.177, +0.202]) — still selection noise. The printed band was
+// too narrow before recalibration
 // (leave-one-out put 35.9% of tokens inside it, not the 50% a middle
 // band claims), so the band is widened by the widening the build computes
 // until held-out coverage reaches 50%, and the measured coverage is
