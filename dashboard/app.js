@@ -363,7 +363,7 @@
       el('div', { class: 'field' }, el('label', { for: 'mintvl', text: 'Size' }), tvlSelect),
       el('label', { class: 'check', for: 'watch' }, watchBox, el('span', { text: 'Watchlist only' })),
       el('div', { class: 'tabs' }, pre, live),
-      el('div', { class: 'tabs' }, t1, t2),
+      state.tab === 'pre-token' ? el('div', { class: 'tabs' }, t1, t2) : null,
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : DATA.live.length + ' live-token protocols' }));
   }
 
@@ -606,7 +606,7 @@
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
       el('div', { class: 'farm-sum' },
-        el('span', null, el('b', { text: '$' + ticket.deposit_usd }), ' capital'),
+        el('span', null, el('b', { text: fmtDollars(ticket.deposit_usd) }), ' capital'),
         el('span', null, el('b', { text: row.farm_summary.gas })),
         el('span', null, el('b', { text: row.farm_summary.hold_days + ' days' }), ' hold'),
         el('span', null, el('b', { text: '~' + row.farm_summary.setup_minutes + ' min' }), ' to set up')),
