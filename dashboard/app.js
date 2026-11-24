@@ -1,6 +1,5 @@
 (function () {
   'use strict';
-
   var DATA = window.RADAR;
   if (!DATA) return;
   var app = document.getElementById('board');
@@ -36,7 +35,6 @@
     var curve = Math.pow(10, DATA.size_curve.intercept) * Math.pow(Math.max(1, row.tvl_usd), DATA.size_curve.slope);
     return Math.max(1, Math.round(curve * growthMult * maturity * breadth));
   }
-
   function verdictOf(slice, gas, forgone, net, netPerHour) {
     var r = DATA.verdict_rule || { kind: 'net_positive' };
     if (r.kind === 'net_per_hour') return netPerHour >= r.threshold_usd ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP';
@@ -50,7 +48,6 @@
   }
   function firstChainOf(p) { return (p.chains && p.chains.length) ? p.chains[0] : ''; }
   function fmtGas(n) { return n % 1 === 0 ? '$' + n : '$' + n.toFixed(2); }
-
   function gasRateOf(row) {
     var f = DATA.farm, txGas = gasTxUsd(firstChainOf(row)), hold = holdDaysFor(row.age_days), weeks = Math.floor(hold / 7);
     return { gas: (f.gas_funding_txs + f.gas_deposit_claim_txs + f.gas_weekly_txs * weeks) * txGas, rate: f.share * (row.implied_value_usd / Math.max(1, row.tvl_usd)) - f.tbill_rate * (hold / 365) };
@@ -181,7 +178,6 @@
     if (next) window.history.replaceState(null, '', '#' + next);
     else window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
-
   function chainLabel(r) { return (r.chains && r.chains.length) ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain'; }
   function rows() {
     var q = state.q.trim().toLowerCase();
@@ -220,7 +216,6 @@
     var sc = DATA.size_curve, v = DATA.validation, wf = walkForward();
     return 'Size curve with growth, maturity and breadth, fitted on ' + sc.live_count + ' stand-alone tokens, tested leave-one-out ×' + v.fitted.median_miss.toFixed(2) + (wf === null ? '' : ' and walk-forward ×' + wf.toFixed(2)) + ', P25–P75 ranges';
   }
-
   function header() {
     return el('header', { class: 'top' },
       el('div', { class: 'brand' }, el('span', { class: 'mark' }), el('span', { text: 'Token Radar' })),
@@ -265,7 +260,6 @@
       el('div', { class: 'formula-line' }, el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x growth x maturity x breadth' })),
       el('p', { text: example + ' ' + check + ' ' + wf + ' ' + bandDef }));
   }
-
   function setAsideTotal(led) {
     var s = led.set_aside || {};
     return (s.bridge || 0) + (s.liquid_staking || 0) + (s.exchange || 0) + (s.versioned || 0) + (s.wrapped || 0) + (s.kin || 0);
@@ -305,7 +299,6 @@
       DATA.board_checksum ? el('p', { class: 'sub', text: 'Source open: board.json sha256 ' + DATA.board_checksum + ' — recompute it from data.js.' }) : null
     );
   }
-
   function limitsPanel() {
     var items = [], b = DATA.band_honesty;
     if (b && b.middle_measured !== undefined && b.middle_before !== undefined) {
@@ -324,18 +317,6 @@
       el('ul', null, items.map(function (t) { return el('li', { text: t }); }))
     );
   }
-  function spotlight() {
-    var top3 = DATA.rows.slice(0, 3);
-    return el('section', { class: 'spot', 'aria-label': 'Top three by implied value' },
-      top3.map(function (r) {
-        return el('button', { type: 'button', class: 'spot-card', onclick: function () { openDetail(r.slug); } },
-          el('span', { class: 'rank', text: 'Rank ' + r.rank }), el('h3', { text: r.name }),
-          el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + chainLabel(r) }),
-          el('div', { class: 'val', text: fmtUsd(r.implied_value_usd) + ' implied' }));
-      })
-    );
-  }
-
   function controls() {
     var categories = Array.from(new Set(DATA.rows.map(function (r) { return r.category || 'Other'; }))).sort();
     var chains = Array.from(new Set(DATA.rows.reduce(function (acc, r) { return acc.concat(r.chains || []); }, []))).sort();
@@ -366,7 +347,6 @@
       state.tab === 'pre-token' ? el('div', { class: 'tabs' }, t1, t2) : null,
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : DATA.live.length + ' live-token protocols' }));
   }
-
   function sortHeader(key, label) {
     return el('th', { scope: 'col' },
       el('button', { type: 'button', onclick: function () { if (state.sort === key) state.dir = -state.dir; else { state.sort = key; state.dir = -1; } render(); } }, label, state.sort === key ? el('span', { 'aria-hidden': 'true', text: state.dir < 0 ? ' v' : ' ^' }) : null));
@@ -414,7 +394,6 @@
       el('div', { class: 'hist-label sub', text: 'Market cap vs TVL, log scale: fitted tokens in teal, shown rows in blue, fitted curve and widened P25–P75 band.' })
     );
   }
-
   function verdictCell(r) {
     var t = ticketFor(r);
     var cls = t.verdict === 'FARM' ? 'farm' : t.verdict === 'THIN' ? 'thin' : 'skipv';
@@ -473,7 +452,6 @@
           )),
           tbody)));
   }
-
   function liveTable() {
     var tbody = el('tbody');
     DATA.live.forEach(function (r) {
@@ -505,7 +483,6 @@
         'implied = round(10^' + sc.intercept.toFixed(4) + ' x tvl_usd^' + sc.slope.toFixed(4) + ' x (1+clamp(change_7d,' + m.growth_floor + ',' + m.growth_cap + ')/100 x ' + m.growth_weight + ') x (' + m.maturity_floor + '+min(age_days,' + m.maturity_days + ')/' + m.maturity_days + ' x ' + m.maturity_range + ') x breadth)'),
       el('p', { class: 'sub', text: 'The size curve is fitted on the ' + sc.live_count + ' stand-alone tokens that trade here (' + fu.excluded_live + ' wrapped/bridged/staked/versioned live tokens are excluded from the fit, not hidden), by ordinary least squares on log market cap against log TVL (ratios winsorised to 0.01–5). No category factor: fitted and dropped — it loses on all three held-out tests (see the term table) — so the curve prices every row without a category adjustment. Each row’s range is the middle half of its category’s live comps around the curve (25th–75th percentile of residuals), widened x' + b.widen.toFixed(2) + ': the raw band held only ' + Math.round(b.middle_before * 1000) / 10 + '% of held-out tokens; widened, ' + Math.round(b.middle_measured * 1000) / 10 + '% inside it (' + Math.round(b.outer_measured * 1000) / 10 + '% inside P10–P90, was ' + Math.round(b.outer_before * 1000) / 10 + '%). Age is days since first listing (unlisted: ' + m.unknown_age_days + ' days). Breadth adds 2% per extra chain, at most 10%. The flat median (' + fmtMult(DATA.global_comp) + ' global) is the baseline the curve beat: leave-one-out on the same ' + v.fitted.n + ' tokens gives x' + v.fitted.median_miss.toFixed(2) + ' median miss, ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x, against x' + v.flat.median_miss.toFixed(2) + ' / ' + Math.round(v.flat.within_3x * 1000) / 10 + '% flat. Walk-forward: x' + w.half.median_miss.toFixed(2) + ' older-half → newer, x' + w.days900.median_miss.toFixed(2) + ' 900d+ → newer.' + barText }));
   }
-
   function termPanel() {
     var tbody = el('tbody');
     (DATA.term_table || []).forEach(function (t) {
@@ -526,7 +503,6 @@
       )
     );
   }
-
   function compsPanel() {
     var tbody = el('tbody');
     DATA.comps.slice(0, 12).forEach(function (c) {
@@ -547,15 +523,12 @@
       )
     );
   }
-
   function riskNote() {
     return el('section', { class: 'panel note' },
       el('p', null, el('b', { text: 'Read this before you farm. ' }), '“No token on record” is what DefiLlama reports — not proof a protocol has no token, and not a promise one will launch. Implied value assumes the protocol keeps its TVL and the market keeps paying the fitted curve; a token can be worth far less, or nothing. Never deposit money you cannot lose, never pay to claim, and never sign a blind approval.'));
   }
-
   var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
-
   function openDetail(slug) {
     var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
     if (!row) return;
@@ -618,9 +591,7 @@
     ));
     if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); } else dialog.setAttribute('open', '');
   }
-
   function fmtTest(s) { return 'x' + s.median_miss.toFixed(2) + ' · ' + Math.round(s.within_3x * 1000) / 10 + '%'; }
-
   function decisiveTable() {
     var tb = el('tbody');
     (DATA.term_table || []).forEach(function (t) {
@@ -633,13 +604,11 @@
       el('caption', { text: 'Decisive comparison — outer band: ' + Math.round(DATA.band_honesty.outer_measured * 1000) / 10 + '% inside P10–P90.' }),
       tb));
   }
-
   function render() {
     app.textContent = '';
     document.title = 'Token Radar — ' + titleText();
     var shell = el('div', { class: 'shell' });
     shell.appendChild(header()); shell.appendChild(lede()); shell.appendChild(integrityStrip()); shell.appendChild(formulaBar()); shell.appendChild(decisiveTable());
-    if (state.tab === 'pre-token') shell.appendChild(spotlight());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') {
@@ -653,7 +622,6 @@
     if (!dialog.isConnected) app.appendChild(dialog);
     if (state.selected) openDetail(state.selected);
   }
-
   readHash();
   render();
   window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && dialog.open) dialog.close(); });
