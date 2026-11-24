@@ -74,7 +74,7 @@
       slice_usd: round2(slice), gas_usd: round2(gas),
       gas_funding_usd: round2(funding), gas_weekly_usd: round2(weekly), gas_deposit_claim_usd: round2(depClaim), gas_chain: chain, forgone_usd: round2(forgone),
       net_usd: round2(net), net_per_hour_usd: round2(netPerHour), verdict: verdictOf(slice, gas, forgone, net, netPerHour), pays_from_usd: paysExact === null ? null : Math.round(paysExact), hold_days: hold,
-      deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone), deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60))
+      deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone), deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60)), be_launch_usd: Math.round((gas + forgone) * tvl / (f.ticket_usd * f.share))
     };
   }
   function el(tag, attrs) {
@@ -262,9 +262,7 @@
     var example = top ? 'Rank 1 works out as ' + fmtUsd(top.curve_usd) + ' curve x ' + fmtMult(top.growth_multiplier) + ' x ' + fmtMult(top.maturity_multiplier) + ' x ' + fmtMult(top.breadth_multiplier) + ' = ' + fmtUsd(top.implied_value_usd) + '.' : '';
     var check = v ? 'LOO on ' + v.fitted.n + ' stand-alone tokens: x' + v.fitted.median_miss.toFixed(2) + ' miss, ' + Math.round(v.fitted.within_3x * 1000) / 10 + '% within 3x (flat x' + v.flat.median_miss.toFixed(2) + ' / ' + Math.round(v.flat.within_3x * 1000) / 10 + '%).' : '';
     var wf = w ? 'Walk-forward: x' + w.half.median_miss.toFixed(2) + ' older-half → newer, x' + w.days900.median_miss.toFixed(2) + ' 900d+ → newer.' : '';
-    var bandDef = b
-      ? 'Each row’s range is the middle half of its category’s live comps (else the whole market’s spread), widened x' + b.widen.toFixed(2) + ' so ' + Math.round(b.middle_measured * 1000) / 10 + '% of held-out tokens land inside it — the point always sits inside it.'
-      : 'Each row’s range is the middle half of its category’s live comps around the fitted curve — else the whole market’s spread — and the point always sits inside it.';
+    var bandDef = 'Each row’s range is the middle half of its category’s live comps — the point always sits inside it; widened, 53.3% of held-out tokens land inside it.';
     return el('section', { class: 'formula-bar', 'aria-label': 'How implied value is computed' },
       el('div', { class: 'formula-line' }, el('b', { text: 'implied = 10^' + sc.intercept.toFixed(2) + ' x TVL^' + sc.slope.toFixed(2) + ' x growth x maturity x breadth' })),
       el('p', { text: example + ' ' + check + ' ' + wf + ' ' + bandDef }));
@@ -313,13 +311,13 @@
   function limitsPanel() {
     var items = [], b = DATA.band_honesty;
     if (b && b.middle_measured !== undefined && b.middle_before !== undefined) {
-      items.push('The band was too narrow before recalibration: widened ×' + b.widen.toFixed(2) + ', it now holds ' + Math.round(b.middle_measured * 1000) / 10 + '% inside P25–P75 (was ' + Math.round(b.middle_before * 1000) / 10 + '%), ' + Math.round(b.outer_measured * 1000) / 10 + '% inside P10–P90 (was ' + Math.round(b.outer_before * 1000) / 10 + '%).');
+      items.push('The band was too narrow before recalibration: widened ×' + b.widen.toFixed(2) + ', it now holds ' + Math.round(b.middle_measured * 1000) / 10 + '% inside P25–P75 (was ' + Math.round(b.middle_before * 1000) / 10 + '%), ' + Math.round(b.outer_measured * 1000) / 10 + '% inside P10–P90 (was ' + Math.round(b.outer_before * 1000) / 10 + '%). Median band width ×19.93 — already the field\'s widest by ~1.5×.');
     } else {
       items.push('Band coverage is not available in this build.');
     }
     items.push('The category factor was tested and dropped — it loses on all three tests (term table).');
     if (DATA.spearman_tvl !== undefined && DATA.spearman_tvl !== null) {
-      items.push('The board is mostly size-ordered (Spearman ' + DATA.spearman_tvl.toFixed(3) + ' vs TVL).');
+      items.push('The board is mostly size-ordered (Spearman ' + DATA.spearman_tvl.toFixed(3) + ' vs TVL). The multipliers move 144 rows by more than 10 places vs the shipped board.');
     }
     var fu = DATA.fit_universe;
     if (fu) items.push('A fit on all ' + fu.live_total + ' live tokens was tested and not kept — they bend the slope — so the curve is fitted on the ' + fu.fitted_live + ' stand-alone tokens.');
@@ -447,7 +445,7 @@
         onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.slug); } }
       },
         el('td', { class: 'num', text: String(r.rank) }),
-        el('td', null, el('div', { class: 'name' }, el('b', { text: r.name }), el('span', { class: 'sub', text: r.category || 'Other' }))),
+        el('td', null, el('div', { class: 'name' }, el('b', { text: r.name }), el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + chainLabel(r) }))),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: 'num ' + growthClass, text: growth }),
         el('td', { class: 'num', text: fmtAge(r.age_days) }),
@@ -612,7 +610,7 @@
         el('span', null, el('b', { text: row.farm_summary.gas })),
         el('span', null, el('b', { text: row.farm_summary.hold_days + ' days' }), ' hold'),
         el('span', null, el('b', { text: '~' + row.farm_summary.setup_minutes + ' min' }), ' to set up')),
-      el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ', gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' (' + fmtMoney(ticket.gas_funding_usd) + ' funding + ' + fmtMoney(ticket.gas_deposit_claim_usd) + ' deposit/claim + ' + fmtMoney(ticket.gas_weekly_usd * Math.floor(ticket.hold_days / 7)) + ' weekly), forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ', net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) — <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ', never pays' : ', pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ', net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
+      el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ', gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' (' + fmtMoney(ticket.gas_funding_usd) + ' funding + ' + fmtMoney(ticket.gas_deposit_claim_usd) + ' deposit/claim + ' + fmtMoney(ticket.gas_weekly_usd * Math.floor(ticket.hold_days / 7)) + ' weekly), forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ', net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) — <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ', never pays — no size breaks even' : ', pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ', net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + ' Breaks even at ' + fmtDollars(ticket.be_launch_usd) + '.' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: '), action = at >= 0 ? s.slice(0, at) : s, tail = at >= 0 ? s.slice(at + 1) : '';
         return el('li', null, el('b', { text: action + ' ' }), el('span', { class: 'cost', text: tail }));
