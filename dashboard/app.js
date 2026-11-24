@@ -77,7 +77,7 @@
   }
   function gridText(net) { return (net >= 0 ? '+' : '') + fmtExact(round2(net)); }
   function gridHtml(row) {
-    var s = '<table class="mini"><caption>Net by deposit × assumed drop share — the share is assumed, not measured.</caption><tr><th>Verdict + net</th><th class="num">$1,000</th><th class="num">$5,000</th><th class="num">$10,000</th></tr>';
+    var s = '<table class="mini"><caption>Net by deposit × assumed drop share — the share is assumed, not measured. FARM ≥ $10/h.</caption><tr><th>Verdict + net</th><th class="num">$1,000</th><th class="num">$5,000</th><th class="num">$10,000</th></tr>';
     [[0.035, '3.5%'], [0.07, '7%'], [0.14, '14%']].forEach(function (r) {
       s += '<tr><th>' + r[1] + '</th>';
       [1000, 5000, 10000].forEach(function (d) { var c = ticketOf(row, d, r[0]); s += '<td class="num">' + c.verdict + ' ' + gridText(c.net_usd) + '</td>'; });
