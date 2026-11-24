@@ -63,19 +63,30 @@
     if (gr.rate > 0) { while (deposit < cap && deposit * gr.rate - gr.gas < 0.10) deposit += 25; }
     return deposit;
   }
-  function ticketOf(row) {
+  function ticketOf(row, ticketUsd, share) {
     var f = DATA.farm, chain = firstChainOf(row), txGas = gasTxUsd(chain), hold = holdDaysFor(row.age_days), weeks = Math.floor(hold / 7);
+    ticketUsd = ticketUsd || f.ticket_usd; share = share || f.share;
     var funding = f.gas_funding_txs * txGas, depClaim = f.gas_deposit_claim_txs * txGas, weekly = f.gas_weekly_txs * txGas;
-    var gas = funding + depClaim + weekly * weeks, forgone = f.ticket_usd * f.tbill_rate * (hold / 365), tvl = Math.max(1, row.tvl_usd);
-    var slice = (f.ticket_usd * f.share * row.implied_value_usd) / tvl, net = slice - gas - forgone, minutes = 55 + 10 * weeks, netPerHour = net / (minutes / 60);
-    var rate = f.share * (row.implied_value_usd / tvl) - f.tbill_rate * (hold / 365), paysExact = rate > 0 ? gas / rate : null, deposit = planCapitalOf(row, f.ticket_usd);
-    var depositSlice = (deposit * f.share * row.implied_value_usd) / tvl, depositForgone = deposit * f.tbill_rate * (hold / 365), depositNet = depositSlice - gas - depositForgone;
+    var gas = funding + depClaim + weekly * weeks, forgone = ticketUsd * f.tbill_rate * (hold / 365), tvl = Math.max(1, row.tvl_usd);
+    var slice = (ticketUsd * share * row.implied_value_usd) / tvl, net = slice - gas - forgone, minutes = 55 + 10 * weeks, netPerHour = net / (minutes / 60);
+    var rate = share * (row.implied_value_usd / tvl) - f.tbill_rate * (hold / 365), paysExact = rate > 0 ? gas / rate : null, deposit = planCapitalOf(row, ticketUsd);
+    var depositSlice = (deposit * share * row.implied_value_usd) / tvl, depositForgone = deposit * f.tbill_rate * (hold / 365), depositNet = depositSlice - gas - depositForgone;
     return {
       slice_usd: round2(slice), gas_usd: round2(gas),
       gas_funding_usd: round2(funding), gas_weekly_usd: round2(weekly), gas_deposit_claim_usd: round2(depClaim), gas_chain: chain, forgone_usd: round2(forgone),
       net_usd: round2(net), net_per_hour_usd: round2(netPerHour), verdict: verdictOf(slice, gas, forgone, net, netPerHour), pays_from_usd: paysExact === null ? null : Math.round(paysExact), hold_days: hold,
-      deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone), deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60)), be_launch_usd: Math.round((gas + forgone) * tvl / (f.ticket_usd * f.share))
+      deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone), deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60)), be_launch_usd: Math.round((gas + forgone) * tvl / (ticketUsd * share))
     };
+  }
+  function gridText(net) { return (net >= 0 ? '+' : '') + fmtExact(round2(net)); }
+  function gridHtml(row) {
+    var s = '<table class="mini"><caption>Net by deposit × assumed drop share — the share is assumed, not measured.</caption><tr><th>Verdict + net</th><th class="num">$1,000</th><th class="num">$5,000</th><th class="num">$10,000</th></tr>';
+    [[0.035, '3.5%'], [0.07, '7%'], [0.14, '14%']].forEach(function (r) {
+      s += '<tr><th>' + r[1] + '</th>';
+      [1000, 5000, 10000].forEach(function (d) { var c = ticketOf(row, d, r[0]); s += '<td class="num">' + c.verdict + ' ' + gridText(c.net_usd) + '</td>'; });
+      s += '</tr>';
+    });
+    return s + '</table>';
   }
   function ticketFor(r) { return state.ticket === 10000 ? r.ticket10000 : (r.ticket || ticketOf(r)); }
   function el(tag, attrs) {
@@ -611,6 +622,7 @@
         el('span', null, el('b', { text: row.farm_summary.hold_days + ' days' }), ' hold'),
         el('span', null, el('b', { text: '~' + row.farm_summary.setup_minutes + ' min' }), ' to set up')),
       el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(state.ticket) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ', gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' (' + fmtMoney(ticket.gas_funding_usd) + ' funding + ' + fmtMoney(ticket.gas_deposit_claim_usd) + ' deposit/claim + ' + fmtMoney(ticket.gas_weekly_usd * Math.floor(ticket.hold_days / 7)) + ' weekly), forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ', net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) — <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ', never pays — no size breaks even' : ', pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ', net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + ' Breaks even at ' + fmtDollars(ticket.be_launch_usd) + '.' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
+      el('div', { class: 'table-wrap', html: gridHtml(row) }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: '), action = at >= 0 ? s.slice(0, at) : s, tail = at >= 0 ? s.slice(at + 1) : '';
         return el('li', null, el('b', { text: action + ' ' }), el('span', { class: 'cost', text: tail }));
