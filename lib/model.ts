@@ -334,6 +334,8 @@ export interface RadarRow {
   breadth_multiplier: number;
   /** What a $1,000 farm ticket in this row is worth: slice, gas, net, verdict. */
   ticket: TicketEconomics;
+  /** The same ticket priced at $10,000: same shape as `ticket`, including deposit_* at the $10k cap and be_launch_usd at the $10k ticket. */
+  ticket10000: TicketEconomics;
   farm_summary: FarmSummary;
   on_watchlist: boolean;
 }
@@ -418,11 +420,15 @@ export interface RadarData {
   total_implied_usd: number;
   /** How the standard tickets came out under the chosen bar (see verdict_rule): FARM clears the bar, THIN beats its fees only, SKIP does not cover them. ROBUST is the FARM rows that pay even at the low end of their band. */
   verdict_counts: { farm: number; thin: number; skip: number; robust: number };
+  /** The same counts struck at the $10,000 ticket: ROBUST is the $10k FARM rows that pay even at the low end of their band. */
+  verdict_counts_10000: { farm: number; thin: number; skip: number; robust: number };
   /** The verdict rule the tickets were struck under, with the candidate bars' verdicts on this board so the page states the elimination from computed numbers, not from a carried claim. */
   verdict_rule: VerdictRule;
   bar_decision: BarDecision;
   /** Farming every FARM row at the $1,000 ticket: the summed net and the summed plan hours, for the chosen bar only. */
   farm_book: { net_usd: number; hours: number };
+  /** Farming every $10k FARM row at the $10,000 ticket: the summed net and the summed plan hours, for the chosen bar only. */
+  farm_book_10000: { net_usd: number; hours: number };
   /** How size-ordered the remodelled board is: Spearman rank correlation between board rank and TVL-descending rank. */
   spearman_tvl: number;
   /** The ticket's own stated assumptions, so the page recomputes it from the same numbers. */
@@ -1371,8 +1377,10 @@ export interface TicketEconomics {
   verdict: 'FARM' | 'THIN' | 'SKIP';
   /** The ticket at which the plan breaks even, or null when the T-bill beats it at any size. */
   pays_from_usd: number | null;
+  /** The launch value at which this ticket breaks even: (gas + forgone) x TVL / (ticket x 10%). Always a number, even when pays_from_usd is null (no size breaks even) — it is the break-even launch, not a size. */
+  be_launch_usd: number;
   hold_days: number;
-  /** The plan's own deposit for this protocol — max(TVL tier, pays_from) rounded up to the next $25 when pays_from exists and is at most $1,000, else the TVL tier — the size the farm plan actually deposits, not the yardstick. */
+  /** The plan's own deposit for this protocol — max(TVL tier, pays_from) rounded up to the next $25 when pays_from exists and is at most the ticket, else the TVL tier — the size the farm plan actually deposits, not the yardstick. */
   deposit_usd: number;
   /** That deposit's pro-rata share of the implied value. */
   deposit_slice_usd: number;
@@ -1475,14 +1483,14 @@ export const FARM: FarmAssumptions = {
  * it does not cover its fees. The plan's own deposit is priced beside
  * the yardstick with the same gas and the same assumed T-bill, sized
  * as max(TVL tier, pays_from) rounded up to the next $25 when
- * pays_from exists and is at most $1,000 — so a FARM row's own deposit
+ * pays_from exists and is at most the ticket — so a FARM row's own deposit
  * pays, by construction (deposit >= gas/rate, using the unrounded
  * pays_from, so rounding cannot push its net below zero) — then lifted
  * by $25 steps while its unrounded net is below $0.10 (capped at
- * $1,000), so a FARM row's own deposit nets at least $0.10 in the
+ * the ticket), so a FARM row's own deposit nets at least $0.10 in the
  * modal instead of a rounded $0.00.
  */
-export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, implied: number): TicketEconomics {
+export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, implied: number, ticketUsd: number = TICKET_USD): TicketEconomics {
   const chain = firstChainOf(protocol);
   const txGas = gasTxUsd(chain);
   const hold = holdDaysFor(age);
@@ -1491,20 +1499,20 @@ export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, 
   const depositClaimUsd = GAS_DEPOSIT_CLAIM_TXS * txGas;
   const weeklyUsd = GAS_WEEKLY_TXS * txGas;
   const gas = fundingUsd + depositClaimUsd + weeklyUsd * weeks;
-  const forgone = TICKET_USD * TBILL_RATE * (hold / 365);
+  const forgone = ticketUsd * TBILL_RATE * (hold / 365);
   const tvl = Math.max(1, protocol.tvl_usd);
-  const slice = (TICKET_USD * TICKET_SHARE * implied) / tvl;
+  const slice = (ticketUsd * TICKET_SHARE * implied) / tvl;
   const net = slice - gas - forgone;
   const minutes = 35 + 10 * weeks + 10 + 10;
   const netPerHour = net / (minutes / 60);
   const rate = TICKET_SHARE * (implied / tvl) - TBILL_RATE * (hold / 365);
   const paysExact = rate > 0 ? gas / rate : null;
-  const deposit = planCapitalFor(protocol, paysExact, rate, gas);
+  const deposit = planCapitalFor(protocol, paysExact, rate, gas, ticketUsd);
   const depositSlice = (deposit * TICKET_SHARE * implied) / tvl;
   const depositForgone = deposit * TBILL_RATE * (hold / 365);
   const depositNet = depositSlice - gas - depositForgone;
   return {
-    ticket_usd: TICKET_USD,
+    ticket_usd: ticketUsd,
     slice_usd: round2(slice),
     gas_usd: round2(gas),
     gas_funding_usd: round2(fundingUsd),
@@ -1517,6 +1525,7 @@ export function ticketEconomics(protocol: SnapshotProtocol, age: number | null, 
     net_per_hour_usd: round2(netPerHour),
     verdict: verdictFor(slice, gas, forgone, net, netPerHour),
     pays_from_usd: paysExact === null ? null : Math.round(paysExact),
+    be_launch_usd: Math.round((gas + forgone) * tvl / (ticketUsd * TICKET_SHARE)),
     hold_days: hold,
     deposit_usd: deposit,
     deposit_slice_usd: round2(depositSlice),
@@ -1596,22 +1605,23 @@ function tierCapitalFor(p: SnapshotProtocol): number {
 /**
  * The plan's own deposit: max(TVL tier, pays_from) rounded up to the
  * next $25, when pays_from (unrounded, so rounding cannot push the
- * deposit's net below zero) exists and is at most the $1,000
- * yardstick; otherwise the TVL tier — the verdict already says do not
+ * deposit's net below zero) exists and is at most the ticket
+ * (`cap`, the ticket the deposit is priced beside — TICKET_USD by
+ * default); otherwise the TVL tier — the verdict already says do not
  * farm those rows. `paysExact` is null when the T-bill beats the plan
  * at any size. After sizing, the deposit is lifted by $25 steps while
  * its UNROUNDED net (deposit * rate - gas) is below $0.10, capped at
- * $1,000, so a FARM row's own deposit never displays a rounded $0.00
+ * the ticket, so a FARM row's own deposit never displays a rounded $0.00
  * net in the modal. `rate` and `gasUsd` are the ticket's own rate and
  * gas, passed by the callers that already hold them; without them the
  * lift cannot be computed and the sized deposit stands.
  */
-export function planCapitalFor(p: SnapshotProtocol, paysExact: number | null, rate: number | null = null, gasUsd = 0): number {
+export function planCapitalFor(p: SnapshotProtocol, paysExact: number | null, rate: number | null = null, gasUsd = 0, cap: number = TICKET_USD): number {
   const tier = tierCapitalFor(p);
-  if (paysExact === null || paysExact > TICKET_USD) return tier;
+  if (paysExact === null || paysExact > cap) return tier;
   let deposit = Math.max(tier, roundUp25(paysExact));
   if (rate !== null && rate > 0) {
-    while (deposit < TICKET_USD && deposit * rate - gasUsd < 0.10) deposit += 25;
+    while (deposit < cap && deposit * rate - gasUsd < 0.10) deposit += 25;
   }
   return deposit;
 }
@@ -1820,6 +1830,12 @@ export function radarRow(
   let high = Math.max(1, Math.round(base * 10 ** band.p75 * mults));
   low = Math.min(low, row.implied_value_usd);
   high = Math.max(high, row.implied_value_usd);
+  // The row's own protocol record, rebuilt from the board row: ticketEconomics
+  // reads only chains (first chain) and tvl_usd off it, and farmSummary the
+  // same record — one shared literal, so the $10k ticket and the summary
+  // can never drift apart. ticket10000 is a RadarRow (data.js) field only:
+  // board.json must gain nothing but be_launch_usd inside ticket objects.
+  const proto: SnapshotProtocol = { slug: row.slug, name: row.name, category: row.category, chains: row.chains, tvl_usd: row.tvl_usd, change_7d: row.change_7d, mcap_usd: row.mcap_usd, listed_at: row.listed_at, gecko_id: row.gecko_id, symbol: row.symbol };
   return {
     rank: row.rank,
     slug: row.slug,
@@ -1844,11 +1860,8 @@ export function radarRow(
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
     ticket: row.ticket,
-    farm_summary: farmSummary(
-      { slug: row.slug, name: row.name, category: row.category, chains: row.chains, tvl_usd: row.tvl_usd, change_7d: row.change_7d, mcap_usd: row.mcap_usd, listed_at: row.listed_at, gecko_id: row.gecko_id, symbol: row.symbol },
-      row.age_days,
-      row.implied_value_usd,
-    ),
+    ticket10000: ticketEconomics(proto, row.age_days, row.implied_value_usd, 10000),
+    farm_summary: farmSummary(proto, row.age_days, row.implied_value_usd),
     on_watchlist: watch.has(row.slug),
   };
 }
@@ -1870,6 +1883,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const watch = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watch.has(r.slug)).length;
   const verdict_counts = { farm: 0, thin: 0, skip: 0, robust: 0 };
+  const verdict_counts_10000 = { farm: 0, thin: 0, skip: 0, robust: 0 };
   let total = 0;
   for (const r of board) {
     total += r.implied_value_usd;
@@ -1889,6 +1903,21 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     if (sliceLow - row.ticket.gas_usd - row.ticket.forgone_usd > 0) verdict_counts.robust++;
     bookNet += row.ticket.net_usd;
     bookHours += (55 + 10 * Math.floor(row.ticket.hold_days / 7)) / 60;
+  }
+  // The $10k counts and book, struck the same way off the $10k ticket:
+  // verdicts counted on every row, ROBUST and the book on the $10k FARM
+  // rows only, with the same slice-low rule as the $1k loop above.
+  let bookNet10000 = 0;
+  let bookHours10000 = 0;
+  for (const row of rows) {
+    if (row.ticket10000.verdict === 'FARM') verdict_counts_10000.farm++;
+    else if (row.ticket10000.verdict === 'THIN') verdict_counts_10000.thin++;
+    else verdict_counts_10000.skip++;
+    if (row.ticket10000.verdict !== 'FARM') continue;
+    const sliceLow10000 = row.ticket10000.slice_usd * ((row.implied_low_usd ?? row.implied_value_usd) / row.implied_value_usd);
+    if (sliceLow10000 - row.ticket10000.gas_usd - row.ticket10000.forgone_usd > 0) verdict_counts_10000.robust++;
+    bookNet10000 += row.ticket10000.net_usd;
+    bookHours10000 += (55 + 10 * Math.floor(row.ticket10000.hold_days / 7)) / 60;
   }
   // The bar decision's candidates, struck on this board from the printed ticket numbers, so the
   // page states the elimination from computed counts.
@@ -1938,9 +1967,11 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     global_comp: round4(comps.global),
     total_implied_usd: total,
     verdict_counts,
+    verdict_counts_10000,
     verdict_rule: VERDICT_RULE,
     bar_decision,
     farm_book: { net_usd: round2(bookNet), hours: round2(bookHours) },
+    farm_book_10000: { net_usd: round2(bookNet10000), hours: round2(bookHours10000) },
     spearman_tvl,
     farm: FARM,
     size_curve: { intercept: fit.intercept, slope: fit.slope, live_count: fit.live_count },
