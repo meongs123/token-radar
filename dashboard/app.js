@@ -4,7 +4,7 @@
   var DATA = window.RADAR;
   if (!DATA) return;
   var app = document.getElementById('board');
-  var state = { q: '', category: 'all', chain: 'all', watchOnly: false, minTvl: 0, tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
+  var state = { q: '', category: 'all', chain: 'all', watchOnly: false, minTvl: 0, tab: 'pre-token', sort: 'implied', dir: -1, selected: null, ticket: 1000 };
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
     if (Math.abs(n) >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
@@ -56,11 +56,11 @@
     return { gas: (f.gas_funding_txs + f.gas_deposit_claim_txs + f.gas_weekly_txs * weeks) * txGas, rate: f.share * (row.implied_value_usd / Math.max(1, row.tvl_usd)) - f.tbill_rate * (hold / 365) };
   }
   function paysExactOf(row) { var gr = gasRateOf(row); return gr.rate > 0 ? gr.gas / gr.rate : null; }
-  function planCapitalOf(row) {
+  function planCapitalOf(row, cap) {
     var tier = tierCapitalFor(row), pays = paysExactOf(row);
-    if (pays === null || pays > DATA.farm.ticket_usd) return tier;
+    if (pays === null || pays > cap) return tier;
     var deposit = Math.max(tier, Math.ceil(pays / 25) * 25), gr = gasRateOf(row);
-    if (gr.rate > 0) { while (deposit < DATA.farm.ticket_usd && deposit * gr.rate - gr.gas < 0.10) deposit += 25; }
+    if (gr.rate > 0) { while (deposit < cap && deposit * gr.rate - gr.gas < 0.10) deposit += 25; }
     return deposit;
   }
   function ticketOf(row) {
@@ -68,7 +68,7 @@
     var funding = f.gas_funding_txs * txGas, depClaim = f.gas_deposit_claim_txs * txGas, weekly = f.gas_weekly_txs * txGas;
     var gas = funding + depClaim + weekly * weeks, forgone = f.ticket_usd * f.tbill_rate * (hold / 365), tvl = Math.max(1, row.tvl_usd);
     var slice = (f.ticket_usd * f.share * row.implied_value_usd) / tvl, net = slice - gas - forgone, minutes = 55 + 10 * weeks, netPerHour = net / (minutes / 60);
-    var rate = f.share * (row.implied_value_usd / tvl) - f.tbill_rate * (hold / 365), paysExact = rate > 0 ? gas / rate : null, deposit = planCapitalOf(row);
+    var rate = f.share * (row.implied_value_usd / tvl) - f.tbill_rate * (hold / 365), paysExact = rate > 0 ? gas / rate : null, deposit = planCapitalOf(row, f.ticket_usd);
     var depositSlice = (deposit * f.share * row.implied_value_usd) / tvl, depositForgone = deposit * f.tbill_rate * (hold / 365), depositNet = depositSlice - gas - depositForgone;
     return {
       slice_usd: round2(slice), gas_usd: round2(gas),
@@ -77,6 +77,7 @@
       deposit_usd: deposit, deposit_slice_usd: round2(depositSlice), deposit_forgone_usd: round2(depositForgone), deposit_net_usd: round2(depositNet), deposit_net_per_hour_usd: round2(depositNet / (minutes / 60)), be_launch_usd: Math.round((gas + forgone) * tvl / (f.ticket_usd * f.share))
     };
   }
+  function ticketFor(r) { return state.ticket === 10000 ? r.ticket10000 : (r.ticket || ticketOf(r)); }
   function el(tag, attrs) {
     var node = document.createElement(tag);
     if (attrs) {
@@ -145,8 +146,8 @@
     if (s.length < 20) s = s + " Hold the position and check the protocol's own page.";
     return s;
   }
-  function farmSteps(p) {
-    var chain = chainOf(p), capital = planCapitalOf(p), hold = holdDaysFor(p.age_days), gas = gasFor(p), txGas = gasTxUsd(chain);
+  function farmSteps(p, cap) {
+    var chain = chainOf(p), capital = planCapitalOf(p, cap), hold = holdDaysFor(p.age_days), gas = gasFor(p), txGas = gasTxUsd(chain);
     return [
       { text: 'Use a fresh wallet holding only the funds you plan to farm, funded from an exchange, seed phrase offline — never farm from the wallet holding your savings.', cost: 'about ' + fmtGas(DATA.farm.gas_funding_txs * txGas) + ' of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and ' + gas, time: '15 minutes to set up' },
@@ -200,8 +201,8 @@
       if (key === 'tvl') return r.tvl_usd;
       if (key === 'growth') return r.change_7d === null ? -Infinity : r.change_7d;
       if (key === 'age') return r.age_days === null ? Infinity : r.age_days;
-      if (key === 'slice') return (r.ticket || ticketOf(r)).slice_usd;
-      if (key === 'net') return (r.ticket || ticketOf(r)).net_per_hour_usd;
+      if (key === 'slice') return ticketFor(r).slice_usd;
+      if (key === 'net') return ticketFor(r).net_per_hour_usd;
       return r.implied_value_usd;
     }
     return list.slice().sort(function (a, b) {
@@ -229,26 +230,23 @@
     );
   }
   function lede() {
-    var vc = DATA.verdict_counts || { farm: 0, thin: 0, skip: 0 };
+    var vc = (state.ticket === 10000 ? DATA.verdict_counts_10000 : DATA.verdict_counts) || { farm: 0, thin: 0, skip: 0 };
     var lo = 0, hi = 0;
     DATA.rows.forEach(function (r) { lo += hasRange(r) ? r.implied_low_usd : r.implied_value_usd; hi += hasRange(r) ? r.implied_high_usd : r.implied_value_usd; });
     var tr = { low: lo, high: hi };
-    var best = null;
-    DATA.rows.forEach(function (r) { var t = r.ticket || ticketOf(r); if (!best || t.net_per_hour_usd > best.t.net_per_hour_usd) best = { name: r.name, t: t }; });
-    var bestLine = best ? ' Farm next: <b>' + best.name + '</b> ' + (best.t.net_per_hour_usd >= 0 ? '+' : '') + fmtMoney(best.t.net_per_hour_usd) + '/h on a ' + fmtDollars(DATA.farm.ticket_usd) + ' ticket.' : '';
     var rule = DATA.verdict_rule || { kind: 'net_positive' };
     var barText = rule.kind === 'net_per_hour'
       ? 'net ≥ $' + rule.threshold_usd + '/h after fees + assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill'
       : rule.kind === 'breakeven_odds'
         ? 'break-even odds ≤ ' + Math.round(rule.farm_max * 100) + '%'
         : 'pay after fees + assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill';
-    var book = DATA.farm_book;
+    var book = state.ticket === 10000 ? DATA.farm_book_10000 : DATA.farm_book;
     var bookLine = book ? ' <b class="farm">ROBUST ' + vc.robust + '</b> pay even at band-low. Farming all ' + vc.farm + ' nets ' + fmtExact(book.net_usd) + ' over ' + book.hours + ' h (' + fmtMoney(book.net_usd / book.hours) + '/h).' : '';
     return el('section', { class: 'lede' },
       el('div', null,
         el('h1', { text: titleText() }),
         el('p', { html: 'Every protocol with no token, priced off the ones that already trade.' }),
-        el('p', { class: 'verdict-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + '</b> ticket: <b class="farm">FARM ' + vc.farm + '</b> ' + barText + ' · <b class="thin">THIN ' + vc.thin + '</b> beat fees only · <b class="skipv">SKIP ' + vc.skip + '</b> fees eat the drop.' + bookLine + bestLine })
+        el('p', { class: 'verdict-line', html: '<b>' + fmtDollars(state.ticket) + '</b> ticket: <b class="farm">FARM ' + vc.farm + '</b> ' + barText + ' · <b class="thin">THIN ' + vc.thin + '</b> beat fees only · <b class="skipv">SKIP ' + vc.skip + '</b> fees eat the drop.' + bookLine })
       ),
       el('div', { class: 'facts' },
         el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: DATA.watchlist_size + ' / ' + DATA.watchlist_size + ' · $' + Math.round(DATA.floor_usd / 1e6) + 'M+' })),
@@ -333,8 +331,7 @@
         return el('button', { type: 'button', class: 'spot-card', onclick: function () { openDetail(r.slug); } },
           el('span', { class: 'rank', text: 'Rank ' + r.rank }), el('h3', { text: r.name }),
           el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + chainLabel(r) }),
-          el('div', { class: 'val', text: fmtUsd(r.implied_value_usd) + ' implied' }),
-          el('span', { class: 'why', text: 'TVL ' + fmtUsd(r.tvl_usd) + ' curve ' + fmtUsd(r.curve_usd) + ', ' + fmtPct(r.change_7d) + ' in 7 days' }));
+          el('div', { class: 'val', text: fmtUsd(r.implied_value_usd) + ' implied' }));
       })
     );
   }
@@ -357,6 +354,8 @@
     watchBox.addEventListener('change', function () { state.watchOnly = watchBox.checked; writeHash(); render(); });
     var pre = el('button', { type: 'button', 'aria-pressed': state.tab === 'pre-token' ? 'true' : 'false', text: 'Pre-token', onclick: function () { state.tab = 'pre-token'; render(); } });
     var live = el('button', { type: 'button', 'aria-pressed': state.tab === 'live' ? 'true' : 'false', text: 'Live token', onclick: function () { state.tab = 'live'; render(); } });
+    var t1 = el('button', { type: 'button', 'aria-pressed': state.ticket === 1000 ? 'true' : 'false', text: '$1,000 ticket', onclick: function () { state.ticket = 1000; render(); } });
+    var t2 = el('button', { type: 'button', 'aria-pressed': state.ticket === 10000 ? 'true' : 'false', text: '$10,000 ticket', onclick: function () { state.ticket = 10000; render(); } });
     return el('div', { class: 'controls' },
       el('div', { class: 'field' }, el('label', { for: 'q', text: 'Search' }), search),
       el('div', { class: 'field' }, el('label', { for: 'category', text: 'Category' }), catSelect),
@@ -364,6 +363,7 @@
       el('div', { class: 'field' }, el('label', { for: 'mintvl', text: 'Size' }), tvlSelect),
       el('label', { class: 'check', for: 'watch' }, watchBox, el('span', { text: 'Watchlist only' })),
       el('div', { class: 'tabs' }, pre, live),
+      el('div', { class: 'tabs' }, t1, t2),
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : DATA.live.length + ' live-token protocols' }));
   }
 
@@ -416,7 +416,7 @@
   }
 
   function verdictCell(r) {
-    var t = r.ticket || ticketOf(r);
+    var t = ticketFor(r);
     var cls = t.verdict === 'FARM' ? 'farm' : t.verdict === 'THIN' ? 'thin' : 'skipv';
     var sub = fmtDollars(t.deposit_usd) + ' · ' + (t.pays_from_usd === null ? 'never pays' : 'pays from ' + fmtDollars(t.pays_from_usd));
     return el('td', null, el('div', { class: 'verdict' }, el('span', { class: 'verdict-chip ' + cls, text: t.verdict }), el('span', { class: 'sub', text: sub })));
@@ -433,7 +433,7 @@
     list.forEach(function (r) { if (r.implied_value_usd > max) max = r.implied_value_usd; });
     var tbody = el('tbody');
     list.forEach(function (r) {
-      var growth = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d), growthClass = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg', t = r.ticket || ticketOf(r);
+      var growth = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d), growthClass = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg', t = ticketFor(r);
       var netText = (t.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(t.net_per_hour_usd)) + '/h', range = null;
       if (r.implied_low_usd !== null && r.implied_low_usd !== undefined && r.implied_high_usd !== null && r.implied_high_usd !== undefined) {
         var left = Math.max(0, Math.min(100, r.implied_low_usd / max * 100)), width = Math.max(1, Math.min(100 - left, (r.implied_high_usd - r.implied_low_usd) / max * 100));
@@ -465,10 +465,10 @@
       scatter(list),
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Strongest implied value first. ' + fmtDollars(DATA.farm.ticket_usd) + ' slice: what the ticket gets if an assumed ' + Math.round(DATA.farm.share * 100) + '% of the launch goes to depositors. Net: slice minus gas and forgone ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill yield, per hour. Gas is priced on the first chain listed; the snapshot carries no fee data, so gas is a range midpoint.' }),
+          el('caption', { class: 'sub', text: 'Strongest implied value first. ' + fmtDollars(state.ticket) + ' slice: what the ticket gets if an assumed ' + Math.round(DATA.farm.share * 100) + '% of the launch goes to depositors. Net: slice minus gas and forgone ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill yield, per hour. Gas is priced on the first chain listed; the snapshot carries no fee data, so gas is a range midpoint.' }),
           el('thead', null, el('tr', null,
             sortHeader('implied', 'Rank'), sortHeader('name', 'Protocol'), sortHeader('tvl', 'TVL'), sortHeader('growth', '7d'), sortHeader('age', 'Age'),
-            el('th', { scope: 'col', text: 'Mult' }), sortHeader('implied', 'Implied value'), sortHeader('slice', fmtDollars(DATA.farm.ticket_usd) + ' slice'), sortHeader('net', 'Net $/h'),
+            el('th', { scope: 'col', text: 'Mult' }), sortHeader('implied', 'Implied value'), sortHeader('slice', fmtDollars(state.ticket) + ' slice'), sortHeader('net', 'Net $/h'),
             el('th', { scope: 'col', text: 'Verdict' }), el('th', { scope: 'col', text: 'Token' })
           )),
           tbody)));
@@ -562,7 +562,7 @@
     state.selected = slug;
     writeHash();
     dialog.textContent = '';
-    var steps = farmSteps(row), recomputed = impliedOf(row, DATA.model), ticket = ticketOf(row), carried = row.ticket || null;
+    var steps = farmSteps(row, state.ticket), recomputed = impliedOf(row, DATA.model), ticket = ticketFor(row), carried = state.ticket === 10000 ? row.ticket10000 || null : row.ticket || null;
     var ticketOk = carried !== null && carried.slice_usd === ticket.slice_usd && carried.net_usd === ticket.net_usd && carried.verdict === ticket.verdict && carried.deposit_net_usd === ticket.deposit_net_usd && carried.gas_chain === ticket.gas_chain && carried.gas_usd === ticket.gas_usd;
     var chains = row.chains && row.chains.length ? row.chains.slice(0, 4).join(', ') + (row.chains.length > 4 ? ' and ' + (row.chains.length - 4) + ' more' : '') : 'an unnamed chain';
     dialog.appendChild(el('div', { class: 'detail-head' },
@@ -606,11 +606,11 @@
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
       el('div', { class: 'farm-sum' },
-        el('span', null, el('b', { text: '$' + row.farm_summary.capital_usd }), ' capital'),
+        el('span', null, el('b', { text: '$' + ticket.deposit_usd }), ' capital'),
         el('span', null, el('b', { text: row.farm_summary.gas })),
         el('span', null, el('b', { text: row.farm_summary.hold_days + ' days' }), ' hold'),
         el('span', null, el('b', { text: '~' + row.farm_summary.setup_minutes + ' min' }), ' to set up')),
-      el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(DATA.farm.ticket_usd) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ', gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' (' + fmtMoney(ticket.gas_funding_usd) + ' funding + ' + fmtMoney(ticket.gas_deposit_claim_usd) + ' deposit/claim + ' + fmtMoney(ticket.gas_weekly_usd * Math.floor(ticket.hold_days / 7)) + ' weekly), forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ', net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) — <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ', never pays — no size breaks even' : ', pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ', net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + ' Breaks even at ' + fmtDollars(ticket.be_launch_usd) + '.' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
+      el('p', { class: 'ticket-line', html: '<b>' + fmtDollars(state.ticket) + ' ticket:</b> slice ' + fmtMoney(ticket.slice_usd) + ', gas ' + fmtMoney(ticket.gas_usd) + ' on ' + (ticket.gas_chain || 'its main chain') + ' (' + fmtMoney(ticket.gas_funding_usd) + ' funding + ' + fmtMoney(ticket.gas_deposit_claim_usd) + ' deposit/claim + ' + fmtMoney(ticket.gas_weekly_usd * Math.floor(ticket.hold_days / 7)) + ' weekly), forgone assumed ' + Math.round(DATA.farm.tbill_rate * 100) + '% T-bill ' + fmtMoney(ticket.forgone_usd) + ', net ' + fmtMoney(ticket.net_usd) + ' (' + (ticket.net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.net_per_hour_usd)) + '/h) — <b>' + ticket.verdict + '</b>' + (ticket.pays_from_usd === null ? ', never pays — no size breaks even' : ', pays from ' + fmtDollars(ticket.pays_from_usd)) + '. Plan deposit ' + fmtDollars(ticket.deposit_usd) + ': slice ' + fmtMoney(ticket.deposit_slice_usd) + ', net ' + fmtMoney(ticket.deposit_net_usd) + ' (' + (ticket.deposit_net_per_hour_usd >= 0 ? '+' : '-') + fmtMoney(Math.abs(ticket.deposit_net_per_hour_usd)) + '/h).' + ' Breaks even at ' + fmtDollars(ticket.be_launch_usd) + '.' + (ticketOk ? '' : ' (differs from the board: the data would be stale.)') }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: '), action = at >= 0 ? s.slice(0, at) : s, tail = at >= 0 ? s.slice(at + 1) : '';
         return el('li', null, el('b', { text: action + ' ' }), el('span', { class: 'cost', text: tail }));
